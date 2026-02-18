@@ -34,7 +34,8 @@ df_wider_and_cleanup <- function(df){
     pivot_wider(
       names_from = col_name, 
       values_from = value_name,
-      values_fill = NA
+      values_fill = NA,
+      values_fn = ~paste(.x, collapse = "|")
     )
   if(any(colnames(df) == "NA")){
     df <- select(df, -"NA")
@@ -49,11 +50,12 @@ df_wider_and_cleanup <- function(df){
 input_excel <- "Oncoprin_CUPxMTB_fakedata.xlsx"
 CUP_data <- read_excel(here("data", input_excel))
 
+CUP_data <- read_excel(file.path(file_location, input_excel))
 dim(CUP_data)
 head(CUP_data)
 colnames(CUP_data)
 
-nr_of_samples <- nrow(CUP_data)
+(nr_of_samples <- nrow(CUP_data))
 ```
 
 Study the data structure
@@ -73,6 +75,8 @@ CUP_data_wrangled <- CUP_data |>
   #split_to_one_row_per_measurement(column_name = `IHC scores`, measurement_name = "IHC") |>
   # Keep the original column before processing
   mutate(value_name = `IHC scores`) |>
+  # replace "na" by NA
+  mutate(value_name = ifelse(value_name == "na", NA, value_name)) |>
   separate_longer_delim(value_name, delim = regex("[;,] ")) |>
   separate_wider_delim(value_name, names = c("col_name", "value_name"), 
                        delim = " ", 
@@ -102,7 +106,7 @@ stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
 Replace columns with only x by NA, because it combines "not assessed", "not detected" and "not relevant". 
 And after that split mutations into a column per gene, where the value is the type of SNV. 
 
-Note: what to do when two SNVs are found in one gene?
+Note: what to do when two SNVs are found in one gene? I now put them in the same field separated by |
 
 ```{r}
 CUP_data_wrangled <- CUP_data_wrangled |>
@@ -124,7 +128,7 @@ CUP_data_wrangled |>
 stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
 ```
 
-## Relevant deletions
+### Relevant deletions
 
 This can be not assessed, assessed (but nothing found or not relevant) or the gene
 name itself.
@@ -145,7 +149,7 @@ CUP_data_wrangled |>
 stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
 ```
 
-## Relevant Amplifications
+### Relevant Amplifications
 
 Similar syntax as deletions.
 
@@ -165,7 +169,7 @@ CUP_data_wrangled |>
 stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
 ```
 
-## Overexpression/Signatures
+### Overexpression/Signatures
 
 This column can have genes and signatures. Use the same approach as in SNVs to
 preserve information in the columns as values.
@@ -190,11 +194,48 @@ stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
 ```
 
 
+## Sort per gene and transpose table
+
+```{r}
+new_colnames <- setdiff(colnames(CUP_data_wrangled), colnames(CUP_data))
+new_colnames
+CUP_data_transposed <- CUP_data_wrangled |>
+  # Move the gene name first so that we can sort them
+  rename_with(
+    ~ sub("(.*?)_(.*)", "\\2_\\1", .x),
+    .cols = all_of(new_colnames))
+
+# Sort columns
+new_colnames_sorted <- setdiff(colnames(CUP_data_transposed), colnames(CUP_data)) |>
+  sort()
+
+CUP_data_transposed <- CUP_data_transposed |>
+  select(all_of(colnames(CUP_data)), all_of(new_colnames_sorted)) |>
+  # Transpose
+  pivot_longer(-CUPID, names_to = "col", values_to = "value") |>
+  mutate(CUPID = paste0("Patient ", CUPID)) |>
+  pivot_wider(names_from = CUPID, values_from = value)
+
+
+colnames(CUP_data_transposed)
+head(CUP_data_transposed)
+```
+
+
+
 ## Save preprocessed data
 
 ```{r}
+output_file <- file.path(file_location, str_replace(input_excel, ".xlsx$", "_preprocessed.csv"))
+print(paste("Saving to...", output_file))
 write_csv(CUP_data_wrangled,
-          file = here("data", str_replace(input_excel, ".xlsx$", "_preprocessed.csv")),
+          file = output_file,
+          na = "")
+
+output_file <- file.path(file_location, str_replace(input_excel, ".xlsx$", "_transposed.csv"))
+print(paste("Saving to...", output_file))
+write_csv(CUP_data_transposed,
+          file = output_file,
           na = "")
 ```
 
