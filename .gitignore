@@ -1,5 +1,12 @@
 data/
 output/
+
+# Related to python
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+
+# Related to R
+.Rproj.user
+*.Rproj
+.Rhistory

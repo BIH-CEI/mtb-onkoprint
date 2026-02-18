@@ -1,0 +1,50 @@
+library(tidyverse)
+library(readxl)
+
+input_excel <- "Oncoprin_CUPxMTB_fakedata.xlsx"
+CUP_data <- read_excel(file.path("data", input_excel))
+
+dim(CUP_data)
+head(CUP_data)
+colnames(CUP_data)
+
+# Descriptive statistics
+
+CUP_data %>% 
+  map(~ tibble(value = .x) %>% count(value))
+
+# Or more explicitly
+CUP_data %>% 
+  map(~ count(tibble(x = .x), x))
+
+# Data wrangling - split multiple IHC scores into separate columns. Deliminators can be comma or semicolon
+CUP_data_wrangled <- CUP_data |>
+  separate_longer_delim(`IHC scores`, delim = regex("[;,] ")) |>
+  separate_wider_delim(`IHC scores`, names = c("IHC", "IHC scores"), 
+                       delim = " ", 
+                       too_few = "align_start",
+                       too_many = "merge") |>
+  # Fix problem that MMR can either be d or p instead of a number behind the name
+  mutate(`IHC scores` = ifelse(IHC %in% c("pMMR", "dMMR"), IHC, `IHC scores`)) |>
+  mutate(IHC = ifelse(IHC %in% c("pMMR", "dMMR"), "MMR", IHC)) |>
+  mutate(IHC = paste0("IHC_", IHC)) |>
+  pivot_wider(
+    names_from = IHC, 
+    values_from = `IHC scores`,
+    values_fill = NA
+  )
+
+# Quality control, check that columns with all NA for IHC were indeed empty
+CUP_data_wrangled |>
+  filter(if_all(starts_with("IHC_"), is.na)) |>
+  pull(CUPID)
+
+# Look at the output
+CUP_data_wrangled |>
+  select(CUPID, starts_with("IHC_")) |> head()
+
+write_csv(CUP_data_wrangled,
+          file = file.path("data", str_replace(input_excel, ".xlsx$", "_preprocessed.csv")),
+          na = "")
+
+  
