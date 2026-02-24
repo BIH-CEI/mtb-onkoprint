@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 
@@ -110,6 +112,7 @@ class OncoPrint:
                   legend_scaler_style="stepped",
                   cell_background="#dddddd", gap=0.3,
                   ratio_template="{0:.0%}",
+                  strict_markers=False,
                   **kwargs):
 
         if 'is_topplot' in kwargs:
@@ -119,6 +122,7 @@ class OncoPrint:
         if 'is_legend' in kwargs:
             legend = kwargs['is_legend']
 
+        self.unknown_markers = set()
         mutation_types = [b[0] for b in sorted(markers.items(), key=lambda a: a[1].get('zindex', 1))]
         self.sorted_mat = self.mat.copy()
         self.sorted_genes = self.genes.copy()
@@ -155,7 +159,7 @@ class OncoPrint:
                     counts_left[i] += 1
                     for mut in np.unique(self.sorted_mat[i, j].split(self.seperator)):
                         if mut not in mutation_types:
-                            print("Warning: Marker for mutation type '%s' is not defined. It will be ignored." % mut)
+                            self.unknown_markers.add(mut)
                             continue
                         stacked_counts_top[mutation_types.index(mut), j] += 1
                         stacked_counts_right[mutation_types.index(mut), i] += 1
@@ -169,6 +173,16 @@ class OncoPrint:
                         else:
                             scatter_mutations[mut][0].append(j)
                             scatter_mutations[mut][1].append(i)
+
+        if self.unknown_markers:
+            msg = (
+                "Marker style not defined for: "
+                + ", ".join(repr(v) for v in sorted(self.unknown_markers))
+                + ". These values will be ignored in the plot."
+            )
+            if strict_markers:
+                raise ValueError(msg)
+            warnings.warn(msg, stacklevel=2)
 
         ax_height = self.sorted_mat.shape[0]
         heatmap_patches = []
