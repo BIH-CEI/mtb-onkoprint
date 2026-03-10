@@ -10,3 +10,5 @@ __pycache__/
 .Rproj.user
 *.Rproj
 .Rhistory
+## Quarto reports
+*.html

@@ -26,7 +26,6 @@ library(readxl)
 
 Define functions
 
-
 ```{r}
 df_wider_and_cleanup <- function(df){
   df <- df |>
@@ -48,9 +47,11 @@ df_wider_and_cleanup <- function(df){
 
 ```{r}
 input_excel <- "Oncoprin_CUPxMTB_fakedata.xlsx"
-CUP_data <- read_excel(here("data", input_excel))
+file_location <- here()
+study_date <- Sys.Date()
+cohort_name <- "CUP"
 
-CUP_data <- read_excel(file.path(file_location, input_excel))
+CUP_data <- read_excel(file.path(file_location, "data", input_excel))
 dim(CUP_data)
 head(CUP_data)
 colnames(CUP_data)
@@ -196,6 +197,8 @@ stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
 
 ## Sort per gene and transpose table
 
+For now the sorting is alphabetical.
+
 ```{r}
 new_colnames <- setdiff(colnames(CUP_data_wrangled), colnames(CUP_data))
 new_colnames
@@ -221,22 +224,42 @@ colnames(CUP_data_transposed)
 head(CUP_data_transposed)
 ```
 
-
-
 ## Save preprocessed data
 
 ```{r}
-output_file <- file.path(file_location, str_replace(input_excel, ".xlsx$", "_preprocessed.csv"))
+if(!dir.exists(file.path(file_location, "output"))) dir.create(file.path(file_location, "output"))
+output_file <- file.path(file_location, "output", str_replace(input_excel, ".xlsx$", "_preprocessed.csv"))
 print(paste("Saving to...", output_file))
 write_csv(CUP_data_wrangled,
           file = output_file,
           na = "")
 
-output_file <- file.path(file_location, str_replace(input_excel, ".xlsx$", "_transposed.csv"))
+output_file <- file.path(file_location,  "output", str_replace(input_excel, ".xlsx$", "_transposed.csv"))
 print(paste("Saving to...", output_file))
 write_csv(CUP_data_transposed,
           file = output_file,
           na = "")
 ```
 
-  
+### Save in the required format for 02_visualization.py
+
+Mayb clinical_metadata would be a better name? Or something similar to CBioPortal?
+
+```{r}
+lookup <- c(
+  # new = old
+  "Patient_identifier" = "CUPID",
+  "Sex"                = "Sex (M/F)",
+  "Rec."               = "MMT recommended (y/n)",
+  "Rec. nr."           = "MMT recommended (number; na/not applicable)",
+  "Diagnosis adapted"  = "Diagnosis adapted (y/n)"
+)
+CUP_data_wrangled |>
+  rename(any_of(lookup)) |>
+  select("Patient_identifier", "Histology", "Sex", "Rec.", "Rec. nr.",
+         "Diagnosis adapted") |>
+  write_csv(file = file.path(
+    file_location,  "output", 
+    str_glue("{study_date}_{cohort_name}_Entities.csv")
+  ))
+```
