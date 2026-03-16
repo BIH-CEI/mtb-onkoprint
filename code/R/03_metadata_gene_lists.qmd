@@ -1,0 +1,72 @@
+---
+title: "03_metadata_gene_lists"
+date: "`r Sys.Date()`"
+engine: knitr
+format: 
+  html:
+    self-contained: true
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    df-print: kable
+---
+
+## Introduction
+
+Merge metadata lists with gene symbols
+
+## Preparation
+
+```{r}
+library(tidyverse)
+library(here)
+library(readxl)
+```
+
+## Load metadata
+
+```{r}
+input_metadata <- "metadata_panels_and_sequencing.xlsx"
+file_location <- here()
+(input_metadata <- file.path(file_location, "data", input_metadata))
+
+gene_identifier_table <- read_csv(file.path(file_location, "data",
+                                   "20250116_gene_identifier_table_unique.csv"))
+```
+```{r}
+metadata_sheets <- setdiff(excel_sheets(input_metadata), "index")
+metadata_sheets
+
+metadata <- lapply(metadata_sheets, \(x) read_excel(path = input_metadata, sheet = x))
+names(metadata) <- metadata_sheets
+
+# full join on gene symbols to get all gene symbols into a data frame
+gene_metadata_merged <- metadata |>
+  imap(\(sheet, column) sheet |> 
+         mutate("platform" = column) |> 
+         select(platform, gene_symbol)) |>
+  bind_rows() |>
+  mutate(gene_symbol2 = gene_symbol) |>
+  pivot_wider(id_cols = gene_symbol, names_from = platform, values_from = gene_symbol2) |>
+  mutate(across(everything(), \(x) replace_na(x, "not assessed"))) |>
+  left_join(
+    select(gene_identifier_table, NCBI_Gene_ID, gene_symbol, Ensembl_gene_ID, HGNC_ID),
+    by = "gene_symbol"
+  )
+head(gene_metadata_merged)
+dim(gene_metadata_merged)
+```
+
+## What to do with old gene names?
+
+Use https://www.genenames.org/tools/multi-symbol-checker/ to get correct info for the missing genes and add it?
+
+## Write to file
+
+```{r}
+write_tsv(gene_metadata_merged,
+          (file.path(file_location, "output", "metadata_panels_and_sequencing.tsv")),
+          na = ""
+          )
+```
+
