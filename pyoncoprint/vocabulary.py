@@ -56,11 +56,17 @@ GENE_SPECIFIC_MARKERS = {
     # BRAF variant classes
     "mut class I",
     "mut class II",
-    "mut class III",
+    "mut class III",  # kinase-impaired, RAS-dependent (e.g. BRAF D594G, G464V, T241M)
 
     # KRAS variant annotations
     "mut G12C",
     "mut nonG12C",
+
+    # HER2 IHC score levels
+    "HER2 0",
+    "HER2 1+",
+    "HER2 2+",
+    "HER2 3+",
 }
 
 # All valid marker values (union)
