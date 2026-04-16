@@ -28,11 +28,12 @@ library(readxl)
 ```{r}
 input_metadata <- "metadata_panels_and_sequencing.xlsx"
 file_location <- here()
-(input_metadata <- file.path(file_location, "data", input_metadata))
+(input_metadata <- file.path(file_location, "data/gene_metadata", input_metadata))
 
-gene_identifier_table <- read_csv(file.path(file_location, "data",
+gene_identifier_table <- read_csv(file.path(file_location, "data/gene_metadata",
                                    "20250116_gene_identifier_table_unique.csv"))
 ```
+
 ```{r}
 metadata_sheets <- setdiff(excel_sheets(input_metadata), "index")
 metadata_sheets
@@ -61,11 +62,58 @@ dim(gene_metadata_merged)
 
 Use https://www.genenames.org/tools/multi-symbol-checker/ to get correct info for the missing genes and add it?
 
+## Include all genes for MASTER WGS
+
+Analysis within DKTK/MASTER whole genome sequencing + RNAseq
+WGS: (whole genome sequencing)
+
+This means (we assume that) that all genes were measured.
+
 ## Write to file
 
 ```{r}
 write_tsv(gene_metadata_merged,
-          (file.path(file_location, "output", "metadata_panels_and_sequencing.tsv")),
+          (file.path(file_location, "data/gene_metadata", "metadata_panels_and_sequencing.tsv")),
+          na = ""
+          )
+# Also save the index table with lists-to-use
+read_excel(path = input_metadata, sheet = "index") |>
+  select(Platform, Gene_list_to_use, `SNVs detected`, `Fusions detected`) |>
+  write_tsv(
+          (file.path(file_location, "data/gene_metadata", "gene_panels_and_platform_names.tsv")),
+          na = ""
+          )
+
+```
+
+## Synthetic metadata
+
+Based on: https://www.statology.org/create-empty-data-frame-in-r/
+
+```{r}
+#create data frame with 0 rows and 5 columns
+gene_metadata_synthetic <- data.frame(matrix(
+  data = rep(c("A", "B", "C", "D"), ncol(gene_metadata_merged)),
+  ncol = ncol(gene_metadata_merged), nrow = 4)
+  )
+
+#provide column names
+colnames(gene_metadata_synthetic) <- colnames(gene_metadata_merged)
+
+
+# Set some to not assessed
+gene_metadata_synthetic[c(1,2),"DHS-3501Z"] <- "not assessed"
+gene_metadata_synthetic[c(1,4), "Archer"] <- "not assessed"
+gene_metadata_synthetic[c(2,3), "Basic-NGS"] <- "not assessed"
+gene_metadata_synthetic[c(1,2), "Master"] <- "not assessed"
+
+# Stuff
+gene_metadata_synthetic["NCBI_Gene_ID"] <- c(1,2,NA,4)
+gene_metadata_synthetic["Ensembl_gene_ID"] <- c("ENSG1","ENSG2",NA,"ENSG4")
+gene_metadata_synthetic
+
+write_tsv(gene_metadata_synthetic,
+          (file.path(file_location, "data/gene_metadata", "metadata_panels_and_sequencing_synthetic.tsv")),
           na = ""
           )
 ```

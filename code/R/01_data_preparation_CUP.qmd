@@ -46,8 +46,12 @@ df_wider_and_cleanup <- function(df){
 ## Load data
 
 ```{r}
-input_excel <- "Oncoprin_CUPxMTB_fakedata.xlsx"
 file_location <- here()
+input_excel <- "Oncoprin_CUPxMTB_syntheticdata_V3.2.xlsx"
+
+# Already list the table of gene panels used. This is needed later to check whether genes were assessed
+gene_panels_tsv <- "metadata_panels_and_sequencing_synthetic.tsv"
+panel_per_platform_lookup_tsv <- "gene_panels_and_platform_names.tsv"
 study_date <- Sys.Date()
 cohort_name <- "CUP"
 
@@ -121,6 +125,46 @@ CUP_data_wrangled <- CUP_data_wrangled |>
     paste0("SNV_", str_extract(value_name, "^[^ ]+")))) |>
   df_wider_and_cleanup()
 
+# Look at the intermediate
+CUP_data_wrangled |>
+  select(CUPID, contains("SNV")) |> head(3)
+
+```
+
+#### Include whether genes were assessed for SNV analysis
+
+Options are: assessed (no SNVs identified), not assessed, or the name of the SNV per gene.
+
+The code below:
+1. Uses the Method column to decide which gene panels were used.
+2. For each gene SNV, it replaces the "NA" with either assessed or not assessed.
+
+```{r}
+gene_panels <- read_tsv(file.path(file_location, "data/gene_metadata", gene_panels_tsv))
+head(gene_panels)
+
+panel_per_platform_lookup <- read_tsv(file.path(file_location, "data/gene_metadata", panel_per_platform_lookup_tsv))
+
+source(here("code/R/functions/genes_assessed.R"))
+
+# 1. Create a list of assessed SNVs per patient
+genes_assessed_per_patient <- map(CUP_data_wrangled$Methods, get_list_of_assessed_genes_per_patient, mutation_type = "SNV")
+
+# 2. Check for each gene symbol if it is assessed
+CUP_data_wrangled <- CUP_data_wrangled |> 
+  mutate(patient_index = row_number()) |>
+  rowwise() |>
+  mutate(
+    across(starts_with("SNV_"), \(x) set_assessment_value(x, patient_index = patient_index, col_name = cur_column())
+    ))|> 
+  select(-patient_index) 
+CUP_data_wrangled |>
+  select(CUPID, Methods, contains("SNV")) |> head(3)
+```
+
+#### Quality control
+
+```{r}
 # Look at the output
 CUP_data_wrangled |>
   select(CUPID, contains("SNV")) |> head()
