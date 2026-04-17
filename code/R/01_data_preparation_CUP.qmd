@@ -139,7 +139,31 @@ CUP_data_wrangled <- CUP_data_wrangled |>
 CUP_data_wrangled |>
   select(CUPID, contains("SNV")) |>
   head(3)
+```
 
+# Create a list of all SNVs in this study
+
+```{r}
+all_SNVs <- CUP_data_wrangled |>
+  # Keep the original column before processing
+  mutate(value_name = `Relevant SNVs`) |>
+  # Replace X by NA
+  mutate(value_name = ifelse(value_name == "x", NA, value_name)) |>
+  separate_longer_delim(value_name, delim = regex("[;,] ")) |>
+  # Assume that the first word of a SNV is the gene
+  mutate(gene_symbol = ifelse(is.na(value_name), NA,
+    str_extract(value_name, "^[^ ]+")
+  )) |>
+  select(gene_symbol, value_name) |>
+  remove_missing() |>
+  arrange(gene_symbol)
+
+output_file <- file.path(file_location, "output", str_glue("all_SNVs_{cohort_name}.csv"))
+print(paste("Saving to...", output_file))
+write_csv(all_SNVs,
+  file = output_file,
+  na = ""
+)
 ```
 
 #### Include whether genes were assessed for SNV analysis
