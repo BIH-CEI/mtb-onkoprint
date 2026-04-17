@@ -60,14 +60,15 @@ dim(gene_metadata_merged)
 
 ## What to do with old gene names?
 
-Use https://www.genenames.org/tools/multi-symbol-checker/ to get correct info for the missing genes and add it?
+Use https://www.genenames.org/tools/multi-symbol-checker/ to get correct info for the missing genes and add it? For now we made no changes.
 
 ## Include all genes for MASTER WGS
 
-Analysis within DKTK/MASTER whole genome sequencing + RNAseq
-WGS: (whole genome sequencing)
+Analysis within DKTK/MASTER whole genome sequencing + RNAseq WGS: (whole genome sequencing)
 
 This means (we assume that) that all genes were measured.
+
+I could either add a list of genes, or allow that everything was assessed. I chose the latter, because it requires no additional programming steps.
 
 ## Write to file
 
@@ -77,8 +78,10 @@ write_tsv(gene_metadata_merged,
           na = ""
           )
 # Also save the index table with lists-to-use
-read_excel(path = input_metadata, sheet = "index") |>
-  select(Platform, Gene_list_to_use, `SNVs detected`, `Fusions detected`) |>
+index_table <- read_excel(path = input_metadata, sheet = "index") |>
+  select(Platform, `Gene list SNVs`, `Gene list Fusions`, `SNVs detected`, `Fusions detected`) 
+
+index_table |>
   write_tsv(
           (file.path(file_location, "data/gene_metadata", "gene_panels_and_platform_names.tsv")),
           na = ""
@@ -118,3 +121,63 @@ write_tsv(gene_metadata_synthetic,
           )
 ```
 
+## Check overlap between gene lists
+
+First, study genes without a HGNC code. These are likely old gene names.
+
+```{r}
+gene_metadata_merged |>
+  filter(is.na(HGNC_ID))
+```
+
+Check if any of these are in our SNVs, fusions, or other lists of interest.
+
+Code based on: <https://upset.app/> and <https://github.com/hms-dbmi/UpSetR?tab=readme-ov-file>.
+
+```{r}
+data_for_upsetplot <- gene_metadata_merged |>
+  select(-"NCBI_Gene_ID", -"Ensembl_gene_ID", -"HGNC_ID") |>
+  rowwise() |>
+  mutate(
+    across(-gene_symbol, \(x) case_when(x == "not assessed" ~ as.integer(0), 
+                                        x == gene_symbol ~ as.integer(1),
+                                        .default = NA))
+  ) |>
+  column_to_rownames("gene_symbol")
+
+if(any(is.na(data_for_upsetplot))) stop()
+
+head(data_for_upsetplot)
+```
+
+```{r}
+table(data_for_upsetplot$Archer)
+```
+
+```{r}
+library(UpSetR)
+
+index_table
+```
+
+```{r}
+# SNVs
+SNV_gene_lists <- index_table |>
+  filter(`SNVs detected` == "yes") |>
+  unique() |>
+  pull(`Gene list SNVs`)
+
+data_for_upsetplot |>
+  select(intersect(colnames(data_for_upsetplot), SNV_gene_lists)) |>
+  upset(nintersects = NA, nsets = ncol(data_for_upsetplot))
+
+# Fusions
+Fusion_gene_lists <- index_table |>
+  filter(`Fusions detected` == "yes") |>
+  unique() |>
+  pull(`Gene list Fusions`)
+
+data_for_upsetplot |>
+  select(intersect(colnames(data_for_upsetplot), Fusion_gene_lists)) |>
+  upset(nintersects = NA, nsets = ncol(data_for_upsetplot))
+```
