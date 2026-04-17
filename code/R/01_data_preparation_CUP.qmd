@@ -13,8 +13,10 @@ format:
 
 ## Introduction
 
-This draft script is used to analyze data in a different format than the previously
-shared 01_data_preparation.ipynb notebook. Documentation will be updated.
+This script processes a dataset where mutations and structural variants are written
+in one column, split by comma's, to a new format where each gene has its own column.
+
+This can later be used for an onkoprint.
 
 ## Preparation
 
@@ -27,16 +29,16 @@ library(readxl)
 Define functions
 
 ```{r}
-df_wider_and_cleanup <- function(df){
+df_wider_and_cleanup <- function(df) {
   df <- df |>
     mutate(col_name = str_replace_all(col_name, " ", "_")) |>
     pivot_wider(
-      names_from = col_name, 
+      names_from = col_name,
       values_from = value_name,
       values_fill = NA,
-      values_fn = ~paste(.x, collapse = "|")
+      values_fn = ~ paste(.x, collapse = "|")
     )
-  if(any(colnames(df) == "NA")){
+  if (any(colnames(df) == "NA")) {
     df <- select(df, -"NA")
   }
   return(df)
@@ -53,11 +55,11 @@ input_excel <- "Oncoprin_CUPxMTB_syntheticdata_V3.2.xlsx"
 gene_panels_tsv <- "metadata_panels_and_sequencing_synthetic.tsv"
 panel_per_platform_lookup_tsv <- "gene_panels_and_platform_names.tsv"
 study_date <- Sys.Date()
-cohort_name <- "CUP"
+cohort_name <- "CUP_synthetic"
 
 CUP_data <- read_excel(file.path(file_location, "data", input_excel))
 dim(CUP_data)
-head(CUP_data)
+head(CUP_data, 1)
 colnames(CUP_data)
 
 (nr_of_samples <- nrow(CUP_data))
@@ -66,27 +68,30 @@ colnames(CUP_data)
 Study the data structure
 
 ```{r}
-CUP_data %>% 
+CUP_data %>%
   map(~ count(tibble(x = .x), x))
 ```
 
 ## Preprocess data
 
 ### IHC scores
+
 Data wrangling - split multiple IHC scores into separate columns. Deliminators can be comma or semicolon
 
 ```{r}
 CUP_data_wrangled <- CUP_data |>
-  #split_to_one_row_per_measurement(column_name = `IHC scores`, measurement_name = "IHC") |>
+  # split_to_one_row_per_measurement(column_name = `IHC scores`, measurement_name = "IHC") |>
   # Keep the original column before processing
   mutate(value_name = `IHC scores`) |>
   # replace "na" by NA
   mutate(value_name = ifelse(value_name == "na", NA, value_name)) |>
   separate_longer_delim(value_name, delim = regex("[;,] ")) |>
-  separate_wider_delim(value_name, names = c("col_name", "value_name"), 
-                       delim = " ", 
-                       too_few = "align_start",
-                       too_many = "merge") |>
+  separate_wider_delim(value_name,
+    names = c("col_name", "value_name"),
+    delim = " ",
+    too_few = "align_start",
+    too_many = "merge"
+  ) |>
   # Fix problem that MMR can either be d or p instead of a number behind the name
   mutate(value_name = ifelse(col_name %in% c("pMMR", "dMMR"), col_name, value_name)) |>
   mutate(col_name = ifelse(col_name %in% c("pMMR", "dMMR"), "MMR", col_name)) |>
@@ -100,11 +105,15 @@ CUP_data_wrangled |>
 
 # Look at the output
 CUP_data_wrangled |>
-  select(CUPID, starts_with("IHC")) |> head()
+  select(CUPID, starts_with("IHC")) |>
+  head(3)
 
 # Quality control: rows should not be added or deleted
 stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
 ```
+
+### Include a measure if IHCs were assessed.
+
 
 ### SNVs
 
@@ -119,15 +128,17 @@ CUP_data_wrangled <- CUP_data_wrangled |>
   mutate(value_name = `Relevant SNVs`) |>
   # Replace X by NA
   mutate(value_name = ifelse(value_name == "x", NA, value_name)) |>
-  separate_longer_delim(value_name, delim = regex("[;,] ")) |> 
+  separate_longer_delim(value_name, delim = regex("[;,] ")) |>
   # Assume that the first word of a SNV is the gene
   mutate(col_name = ifelse(is.na(value_name), NA,
-    paste0("SNV_", str_extract(value_name, "^[^ ]+")))) |>
+    paste0("SNV_", str_extract(value_name, "^[^ ]+"))
+  )) |>
   df_wider_and_cleanup()
 
 # Look at the intermediate
 CUP_data_wrangled |>
-  select(CUPID, contains("SNV")) |> head(3)
+  select(CUPID, contains("SNV")) |>
+  head(3)
 
 ```
 
@@ -151,15 +162,16 @@ source(here("code/R/functions/genes_assessed.R"))
 genes_assessed_per_patient <- map(CUP_data_wrangled$Methods, get_list_of_assessed_genes_per_patient, mutation_type = "SNV")
 
 # 2. Check for each gene symbol if it is assessed
-CUP_data_wrangled <- CUP_data_wrangled |> 
+CUP_data_wrangled <- CUP_data_wrangled |>
   mutate(patient_index = row_number()) |>
   rowwise() |>
   mutate(
-    across(starts_with("SNV_"), \(x) set_assessment_value(x, patient_index = patient_index, col_name = cur_column())
-    ))|> 
-  select(-patient_index) 
+    across(starts_with("SNV_"), \(x) set_assessment_value(x, patient_index = patient_index, col_name = cur_column()))
+  ) |>
+  select(-patient_index)
 CUP_data_wrangled |>
-  select(CUPID, Methods, contains("SNV")) |> head(3)
+  select(CUPID, Methods, contains("SNV")) |>
+  head(3)
 ```
 
 #### Quality control
@@ -167,7 +179,8 @@ CUP_data_wrangled |>
 ```{r}
 # Look at the output
 CUP_data_wrangled |>
-  select(CUPID, contains("SNV")) |> head()
+  select(CUPID, contains("SNV")) |>
+  head(3)
 
 # Quality control: rows should not be added or deleted
 stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
@@ -182,13 +195,14 @@ name itself.
 CUP_data_wrangled <- CUP_data_wrangled |>
   # Keep the original column before processing
   mutate(value_name = `Relevant Deletions`) |>
-  separate_longer_delim(value_name, delim = regex("[;,] ")) |> 
+  separate_longer_delim(value_name, delim = regex("[;,] ")) |>
   mutate(col_name = ifelse(is.na(value_name), NA, paste0("Del_", value_name))) |>
   df_wider_and_cleanup()
 
 # Look at the output
 CUP_data_wrangled |>
-  select(CUPID, contains("Del")) |> head()
+  select(CUPID, contains("Del")) |>
+  head(3)
 
 # Quality control: rows should not be added or deleted
 stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
@@ -202,13 +216,14 @@ Similar syntax as deletions.
 CUP_data_wrangled <- CUP_data_wrangled |>
   # Keep the original column before processing
   mutate(value_name = `Relevant Amplifications`) |>
-  separate_longer_delim(value_name, delim = regex("[;,] ")) |> 
+  separate_longer_delim(value_name, delim = regex("[;,] ")) |>
   mutate(col_name = ifelse(is.na(value_name), NA, paste0("Amp_", value_name))) |>
   df_wider_and_cleanup()
 
 # Look at the output
 CUP_data_wrangled |>
-  select(CUPID, contains("Amp")) |> head()
+  select(CUPID, contains("Amp")) |>
+  head(3)
 
 # Quality control: rows should not be added or deleted
 stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
@@ -225,14 +240,17 @@ CUP_data_wrangled <- CUP_data_wrangled |>
   mutate(value_name = `Overexpression/Signatures`) |>
   separate_longer_delim(value_name, delim = regex("[;,] ")) |>
   # Assume that the first word of a signature is the gene/signature. Or "not assessed"
-  mutate(col_name = ifelse(is.na(value_name), NA, 
-           ifelse(value_name == "not assessed", "Sig_not_assessed",
-    paste0("Sig_", str_extract(value_name, "^[^ ]+"))))) |>
+  mutate(col_name = ifelse(is.na(value_name), NA,
+    ifelse(value_name == "not assessed", "Sig_not_assessed",
+      paste0("Sig_", str_extract(value_name, "^[^ ]+"))
+    )
+  )) |>
   df_wider_and_cleanup()
 
 # Look at the output
 CUP_data_wrangled |>
-  select(CUPID, contains("Sig")) |> head()
+  select(CUPID, contains("Sig")) |>
+  head(2)
 
 # Quality control: rows should not be added or deleted
 stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
@@ -250,7 +268,8 @@ CUP_data_transposed <- CUP_data_wrangled |>
   # Move the gene name first so that we can sort them
   rename_with(
     ~ sub("(.*?)_(.*)", "\\2_\\1", .x),
-    .cols = all_of(new_colnames))
+    .cols = all_of(new_colnames)
+  )
 
 # Sort columns
 new_colnames_sorted <- setdiff(colnames(CUP_data_transposed), colnames(CUP_data)) |>
@@ -265,24 +284,26 @@ CUP_data_transposed <- CUP_data_transposed |>
 
 
 colnames(CUP_data_transposed)
-head(CUP_data_transposed)
+head(CUP_data_transposed, 1)
 ```
 
 ## Save preprocessed data
 
 ```{r}
-if(!dir.exists(file.path(file_location, "output"))) dir.create(file.path(file_location, "output"))
+if (!dir.exists(file.path(file_location, "output"))) dir.create(file.path(file_location, "output"))
 output_file <- file.path(file_location, "output", str_replace(input_excel, ".xlsx$", "_preprocessed.csv"))
 print(paste("Saving to...", output_file))
 write_csv(CUP_data_wrangled,
-          file = output_file,
-          na = "")
+  file = output_file,
+  na = ""
+)
 
-output_file <- file.path(file_location,  "output", str_replace(input_excel, ".xlsx$", "_transposed.csv"))
+output_file <- file.path(file_location, "output", str_replace(input_excel, ".xlsx$", "_transposed.csv"))
 print(paste("Saving to...", output_file))
 write_csv(CUP_data_transposed,
-          file = output_file,
-          na = "")
+  file = output_file,
+  na = ""
+)
 ```
 
 ### Save in the required format for 02_visualization.py
@@ -300,10 +321,12 @@ lookup <- c(
 )
 CUP_data_wrangled |>
   rename(any_of(lookup)) |>
-  select("Patient_identifier", "Histology", "Sex", "Rec.", "Rec. nr.",
-         "Diagnosis adapted") |>
+  select(
+    "Patient_identifier", "Histology", "Sex", "Rec.", "Rec. nr.",
+    "Diagnosis adapted"
+  ) |>
   write_csv(file = file.path(
-    file_location,  "output", 
+    file_location, "output",
     str_glue("{study_date}_{cohort_name}_Entities.csv")
   ))
 ```

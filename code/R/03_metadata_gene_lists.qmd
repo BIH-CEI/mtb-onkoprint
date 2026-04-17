@@ -30,8 +30,10 @@ input_metadata <- "metadata_panels_and_sequencing.xlsx"
 file_location <- here()
 (input_metadata <- file.path(file_location, "data/gene_metadata", input_metadata))
 
-gene_identifier_table <- read_csv(file.path(file_location, "data/gene_metadata",
-                                   "20250116_gene_identifier_table_unique.csv"))
+gene_identifier_table <- read_csv(file.path(
+  file_location, "data/gene_metadata",
+  "20250116_gene_identifier_table_unique.csv"
+))
 ```
 
 ```{r}
@@ -43,9 +45,9 @@ names(metadata) <- metadata_sheets
 
 # full join on gene symbols to get all gene symbols into a data frame
 gene_metadata_merged <- metadata |>
-  imap(\(sheet, column) sheet |> 
-         mutate("platform" = column) |> 
-         select(platform, gene_symbol)) |>
+  imap(\(sheet, column) sheet |>
+    mutate("platform" = column) |>
+    select(platform, gene_symbol)) |>
   bind_rows() |>
   mutate(gene_symbol2 = gene_symbol) |>
   pivot_wider(id_cols = gene_symbol, names_from = platform, values_from = gene_symbol2) |>
@@ -74,19 +76,18 @@ I could either add a list of genes, or allow that everything was assessed. I cho
 
 ```{r}
 write_tsv(gene_metadata_merged,
-          (file.path(file_location, "data/gene_metadata", "metadata_panels_and_sequencing.tsv")),
-          na = ""
-          )
+  (file.path(file_location, "data/gene_metadata", "metadata_panels_and_sequencing.tsv")),
+  na = ""
+)
 # Also save the index table with lists-to-use
 index_table <- read_excel(path = input_metadata, sheet = "index") |>
-  select(Platform, `Gene list SNVs`, `Gene list Fusions`, `SNVs detected`, `Fusions detected`) 
+  select(Platform, `Gene list SNVs`, `Gene list Fusions`, `SNVs detected`, `Fusions detected`)
 
 index_table |>
   write_tsv(
-          (file.path(file_location, "data/gene_metadata", "gene_panels_and_platform_names.tsv")),
-          na = ""
-          )
-
+    (file.path(file_location, "data/gene_metadata", "gene_panels_and_platform_names.tsv")),
+    na = ""
+  )
 ```
 
 ## Synthetic metadata
@@ -94,31 +95,31 @@ index_table |>
 Based on: https://www.statology.org/create-empty-data-frame-in-r/
 
 ```{r}
-#create data frame with 0 rows and 5 columns
+# create data frame with 0 rows and 5 columns
 gene_metadata_synthetic <- data.frame(matrix(
   data = rep(c("A", "B", "C", "D"), ncol(gene_metadata_merged)),
-  ncol = ncol(gene_metadata_merged), nrow = 4)
-  )
+  ncol = ncol(gene_metadata_merged), nrow = 4
+))
 
-#provide column names
+# provide column names
 colnames(gene_metadata_synthetic) <- colnames(gene_metadata_merged)
 
 
 # Set some to not assessed
-gene_metadata_synthetic[c(1,2),"DHS-3501Z"] <- "not assessed"
-gene_metadata_synthetic[c(1,4), "Archer"] <- "not assessed"
-gene_metadata_synthetic[c(2,3), "Basic-NGS"] <- "not assessed"
-gene_metadata_synthetic[c(1,2), "Master"] <- "not assessed"
+gene_metadata_synthetic[c(1, 2), "DHS-3501Z"] <- "not assessed"
+gene_metadata_synthetic[c(1, 4), "Archer"] <- "not assessed"
+gene_metadata_synthetic[c(2, 3), "Basic-NGS"] <- "not assessed"
+gene_metadata_synthetic[c(1, 2), "Master"] <- "not assessed"
 
 # Stuff
-gene_metadata_synthetic["NCBI_Gene_ID"] <- c(1,2,NA,4)
-gene_metadata_synthetic["Ensembl_gene_ID"] <- c("ENSG1","ENSG2",NA,"ENSG4")
+gene_metadata_synthetic["NCBI_Gene_ID"] <- c(1, 2, NA, 4)
+gene_metadata_synthetic["Ensembl_gene_ID"] <- c("ENSG1", "ENSG2", NA, "ENSG4")
 gene_metadata_synthetic
 
 write_tsv(gene_metadata_synthetic,
-          (file.path(file_location, "data/gene_metadata", "metadata_panels_and_sequencing_synthetic.tsv")),
-          na = ""
-          )
+  (file.path(file_location, "data/gene_metadata", "metadata_panels_and_sequencing_synthetic.tsv")),
+  na = ""
+)
 ```
 
 ## Check overlap between gene lists
@@ -139,13 +140,14 @@ data_for_upsetplot <- gene_metadata_merged |>
   select(-"NCBI_Gene_ID", -"Ensembl_gene_ID", -"HGNC_ID") |>
   rowwise() |>
   mutate(
-    across(-gene_symbol, \(x) case_when(x == "not assessed" ~ as.integer(0), 
-                                        x == gene_symbol ~ as.integer(1),
-                                        .default = NA))
+    across(-gene_symbol, \(x) case_when(x == "not assessed" ~ as.integer(0),
+      x == gene_symbol ~ as.integer(1),
+      .default = NA
+    ))
   ) |>
   column_to_rownames("gene_symbol")
 
-if(any(is.na(data_for_upsetplot))) stop()
+if (any(is.na(data_for_upsetplot))) stop()
 
 head(data_for_upsetplot)
 ```

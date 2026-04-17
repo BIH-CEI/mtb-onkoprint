@@ -1,20 +1,21 @@
-get_gene_list_names_from_methdos <- function(Methods, mutation_type){
+get_gene_list_names_from_methdos <- function(Methods, mutation_type) {
   list_of_methods <- str_split_1(Methods, pattern = ", ")
-  
+
   # Filters the list of platforms and returns the names of all gene lists needed
-  panel_list <- filter(panel_per_platform_lookup, 
-                       .data[[mutation_type]] == "yes",
-                       Platform %in% list_of_methods
+  panel_list <- filter(
+    panel_per_platform_lookup,
+    .data[[mutation_type]] == "yes",
+    Platform %in% list_of_methods
   )
   Gene_list_to_use <- panel_list$Gene_list_to_use
   return(Gene_list_to_use)
 }
 
-get_fusion_gene_list_names <- function(Methods){
+get_fusion_gene_list_names <- function(Methods) {
   get_gene_list_names_from_methdos(Methods, mutation_type = "Fusions detected")
 }
 
-get_SNV_gene_list_names <- function(Methods){
+get_SNV_gene_list_names <- function(Methods) {
   get_gene_list_names_from_methdos(Methods, mutation_type = "SNVs detected")
 }
 
@@ -27,52 +28,51 @@ get_genes_from_gene_lists <- function(gene_lists_to_use) {
   return(assessed_genes)
 }
 
-get_list_of_assessed_genes_per_patient <- function(all_methods, mutation_type = "SNV"){
-  
-  if(mutation_type == "SNV"){
+get_list_of_assessed_genes_per_patient <- function(all_methods, mutation_type = "SNV") {
+  if (mutation_type == "SNV") {
     gene_lists_to_use <- get_SNV_gene_list_names(Methods = all_methods)
   }
-  
-  if(mutation_type == "Fusion") {
+
+  if (mutation_type == "Fusion") {
     gene_lists_to_use <- get_fusion_gene_list_names(Methods = all_methods)
   }
-  if("all_assessed" %in% gene_lists_to_use){
+  if ("all_assessed" %in% gene_lists_to_use) {
     return(c("all_assessed"))
   }
   # If no genes were assessed, return an empty vector
-  if(length(gene_lists_to_use) == 0){
+  if (length(gene_lists_to_use) == 0) {
     return(NULL)
   }
   assessed_genes <- get_genes_from_gene_lists(gene_lists_to_use)
   return(assessed_genes)
 }
 
-check_if_gene_was_assessed <- function(patient_index, gene_symbol){
+check_if_gene_was_assessed <- function(patient_index, gene_symbol) {
   assessed_genes <- genes_assessed_per_patient[[patient_index]]
-  
-  if (is.null(assessed_genes)){
+
+  if (is.null(assessed_genes)) {
     return(FALSE)
-  } else if ("all_assessed" %in% assessed_genes){
+  } else if ("all_assessed" %in% assessed_genes) {
     return(TRUE)
-  } else{
+  } else {
     gene_assessed_bool <- gene_symbol %in% assessed_genes
     return(gene_assessed_bool)
   }
 }
 
-set_assessment_value <- function(SNV_value, patient_index, col_name){
-  gene_symbol = str_remove(col_name, "SNV_")
-  if(!is.na(SNV_value)){
+set_assessment_value <- function(SNV_value, patient_index, col_name) {
+  gene_symbol <- str_remove(col_name, "SNV_")
+  if (!is.na(SNV_value)) {
     return(SNV_value)
-  } else{
-    if(patient_index == 4){
+  } else {
+    if (patient_index == 4) {
       gene_assessed_bool <- check_if_gene_was_assessed(patient_index, gene_symbol)
     }
     gene_assessed_bool <- check_if_gene_was_assessed(patient_index, gene_symbol)
   }
-  if(gene_assessed_bool){
+  if (gene_assessed_bool) {
     return("assessed")
-  } else{
+  } else {
     return("not assessed")
   }
 }
@@ -84,17 +84,17 @@ set_assessment_value <- function(SNV_value, patient_index, col_name){
 # get_all_fusion_platforms("CGP, OFA")
 
 # # TODO Test with incorrect/missing methods
-# 
+#
 # # These should give ABCD
 # get_list_of_assessed_genes_per_patient("OFA")
 # get_list_of_assessed_genes_per_patient("Archer, Basic-NGS")
 # get_list_of_assessed_genes_per_patient("CGP, Basic-NGS")
-# 
+#
 # # These should crash
 # get_list_of_assessed_genes_per_patient(all_methods = "Archer", mutation_type = "SNV")
 # # And this one BC
 # get_list_of_assessed_genes_per_patient(all_methods = "Archer", mutation_type = "Fusion")
-# 
+#
 # # Not sure
 # get_list_of_assessed_genes_per_patient(all_methods = "Qiagen DHS-3501Z (keine Fusionsanalyse), Archer", mutation_type = "SNV")
 
