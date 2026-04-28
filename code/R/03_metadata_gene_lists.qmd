@@ -167,11 +167,16 @@ index_table
 SNV_gene_lists <- index_table |>
   filter(`SNVs detected` == "yes") |>
   unique() |>
-  pull(`Gene list SNVs`)
+  pull(`Gene list SNVs`) |>
+  unique()
 
-data_for_upsetplot |>
+p_upset_SNV <- data_for_upsetplot |>
   select(intersect(colnames(data_for_upsetplot), SNV_gene_lists)) |>
-  upset(nintersects = NA, nsets = ncol(data_for_upsetplot))
+  # Everything is measured in WGS and in MASTER, but that is >20.000 genes so only include overlap with other panels. Keep all rows with at least one 1, and set all for WGS to 1:
+  filter_out(if_all(everything(), \(x) x == 0)) |>
+  mutate("WGS-MASTER" = as.integer(1)) |>
+  upset(nintersects = NA, nsets = ncol(data_for_upsetplot) + 1)
+p_upset_SNV
 
 # Fusions
 Fusion_gene_lists <- index_table |>
@@ -179,7 +184,37 @@ Fusion_gene_lists <- index_table |>
   unique() |>
   pull(`Gene list Fusions`)
 
-data_for_upsetplot |>
+p_upset_Fus <- data_for_upsetplot |>
   select(intersect(colnames(data_for_upsetplot), Fusion_gene_lists)) |>
-  upset(nintersects = NA, nsets = ncol(data_for_upsetplot))
+  filter_out(if_all(everything(), \(x) x == 0)) |>
+  mutate("WGS-MASTER" = as.integer(1)) |>
+  upset(nintersects = NA, nsets = ncol(data_for_upsetplot)+1)
+p_upset_Fus
+```
+
+#### Save figures
+
+```{r}
+# Save as png and svg
+save_plot <- function(plot_obj, file_path, filename, verbose = TRUE){
+  png_file <- file.path(file_path, str_glue("{filename}.png"))
+  svg_file <- file.path(file_path, str_glue("{filename}.svg"))
+  if(verbose){
+    print(str_glue("Saving PNG to: {png_file}"))
+    print(str_glue("Saving SVG to: {svg_file}"))
+  }
+  png(png_file, width = 7, height = 7, units = "in", res = 300)
+  show(plot_obj)
+  dev.off()
+  
+  svg(svg_file, width = 7, height = 7)
+  show(plot_obj)
+  dev.off()
+}
+save_plot(p_upset_Fus, 
+          file.path(file_location, "output/gene_metadata"), 
+          "upset_plot_fusions")
+save_plot(p_upset_SNV, 
+          file.path(file_location, "output/gene_metadata"), 
+          "upset_plot_SNVs")
 ```
