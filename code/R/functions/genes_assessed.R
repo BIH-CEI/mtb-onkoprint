@@ -7,7 +7,12 @@ get_gene_list_names_from_methdos <- function(Methods, mutation_type) {
     .data[[mutation_type]] == "yes",
     Platform %in% list_of_methods
   )
-  Gene_list_to_use <- panel_list$Gene_list_to_use
+  if(mutation_type == "Fusions detected"){
+    Gene_list_to_use <- panel_list[["Gene list Fusions"]]
+  } else{
+    Gene_list_to_use <- panel_list[["Gene list SNVs"]]
+  }
+    
   return(Gene_list_to_use)
 }
 
