@@ -172,6 +172,8 @@ index_table
 ```
 
 ```{r}
+#| fig-height: 4.7 # 12 cm
+#| fig-width: 6.3 # 16 cm
 # SNVs
 SNV_gene_lists <- index_table |>
   filter(`SNVs detected` == "yes") |>
@@ -179,12 +181,21 @@ SNV_gene_lists <- index_table |>
   pull(`Gene list SNVs`) |>
   unique()
 
+upset_plot <- function(df){
+  p <- upset(
+    df, 
+    nintersects = NA, 
+    nsets = ncol(data_for_upsetplot) + 1,
+    text.scale = 1.3,
+    mb.ratio = c(0.65, 0.35)
+    )
+}
 p_upset_SNV <- data_for_upsetplot |>
   select(intersect(colnames(data_for_upsetplot), SNV_gene_lists)) |>
   # Everything is measured in WGS and in MASTER, but that is >20.000 genes so only include overlap with other panels. Keep all rows with at least one 1, and set all for WGS to 1:
   filter_out(if_all(everything(), \(x) x == 0)) |>
   mutate("WGS-MASTER" = as.integer(1)) |>
-  upset(nintersects = NA, nsets = ncol(data_for_upsetplot) + 1)
+  upset_plot()
 p_upset_SNV
 
 # Fusions
@@ -197,7 +208,7 @@ p_upset_Fus <- data_for_upsetplot |>
   select(intersect(colnames(data_for_upsetplot), Fusion_gene_lists)) |>
   filter_out(if_all(everything(), \(x) x == 0)) |>
   mutate("WGS-MASTER" = as.integer(1)) |>
-  upset(nintersects = NA, nsets = ncol(data_for_upsetplot)+1)
+  upset_plot()
 p_upset_Fus
 ```
 
@@ -212,11 +223,11 @@ save_plot <- function(plot_obj, file_path, filename, verbose = TRUE){
     print(str_glue("Saving PNG to: {png_file}"))
     print(str_glue("Saving SVG to: {svg_file}"))
   }
-  png(png_file, width = 7, height = 7, units = "in", res = 300)
+  png(png_file, width = 16, height = 12, units = "cm", res = 300)
   show(plot_obj)
   dev.off()
   
-  svg(svg_file, width = 7, height = 7)
+  svg(svg_file, width = 16/2.54, height = 12/2.54)
   show(plot_obj)
   dev.off()
 }
