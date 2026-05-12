@@ -13,7 +13,12 @@ format:
 
 ## Introduction
 
-Merge metadata lists with gene symbols
+Create a table to show which genes were assessed in which molecular diagnostics assay.
+Visualize this using an UpSet plot.
+
+### Note on renaming old gene names
+
+Some gene symbols were no longer used. The HGNC Multi Symbol Checker (https://www.genenames.org/tools/multi-symbol-checker/) and the HGNC approved gene lists with version 2026-04-07 (hgnc_complete_set_2026-04-07.tsv) were used to check for old gene symbols. The original gene symbol, change, and URL are listed in the Excel sheets when any changes were made.
 
 ## Preparation
 
@@ -21,28 +26,38 @@ Merge metadata lists with gene symbols
 library(tidyverse)
 library(here)
 library(readxl)
+library(UpSetR)
 ```
 
 ## Load metadata
 
+Open the HGNC table with gene symbols and HGNC identifiers.
+
+```{r}
+file_location <- here()
+
+gene_identifier_table <- read_tsv(file.path(
+  file_location, "data/gene_metadata",
+  "hgnc_complete_set_2026-04-07.tsv"
+)) |>
+  rename(gene_symbol = symbol)
+```
+Read all sheets in the metadata table, except the index sheet.
+
 ```{r}
 input_metadata <- "metadata_panels_and_sequencing.xlsx"
-file_location <- here()
 (input_metadata <- file.path(file_location, "data/gene_metadata", input_metadata))
 
-gene_identifier_table <- read_csv(file.path(
-  file_location, "data/gene_metadata",
-  "20250116_gene_identifier_table_unique.csv"
-))
-```
-
-```{r}
 metadata_sheets <- setdiff(excel_sheets(input_metadata), "index")
 metadata_sheets
 
 metadata <- lapply(metadata_sheets, \(x) read_excel(path = input_metadata, sheet = x))
 names(metadata) <- metadata_sheets
+```
 
+Combine all sheets with assessed genes into one table.
+
+```{r}
 # full join on gene symbols to get all gene symbols into a data frame
 gene_metadata_merged <- metadata |>
   imap(\(sheet, column) sheet |>
@@ -53,24 +68,18 @@ gene_metadata_merged <- metadata |>
   pivot_wider(id_cols = gene_symbol, names_from = platform, values_from = gene_symbol2) |>
   mutate(across(everything(), \(x) replace_na(x, "not assessed"))) |>
   left_join(
-    select(gene_identifier_table, NCBI_Gene_ID, gene_symbol, Ensembl_gene_ID, HGNC_ID),
+    select(gene_identifier_table, hgnc_id, entrez_id, gene_symbol, ensembl_gene_id),
     by = "gene_symbol"
   )
 head(gene_metadata_merged)
 dim(gene_metadata_merged)
 ```
 
-## What to do with old gene names?
+## Include all genes for MASTER and WGS
 
-Use https://www.genenames.org/tools/multi-symbol-checker/ to get correct info for the missing genes and add it? For now we made no changes.
+For the analysis with DKTK/MASTER or WGS, whole genome sequencing was used.
 
-## Include all genes for MASTER WGS
-
-Analysis within DKTK/MASTER whole genome sequencing + RNAseq WGS: (whole genome sequencing)
-
-This means (we assume that) that all genes were measured.
-
-I could either add a list of genes, or allow that everything was assessed. I chose the latter, because it requires no additional programming steps.
+This means (we assume) that all genes were measured. We could either add a list of genes (e.g >20.000 genes), or only include the genes listed in other assays in tables, and allow "all assessed" in further analyses.
 
 ## Write to file
 
@@ -124,20 +133,20 @@ write_tsv(gene_metadata_synthetic,
 
 ## Check overlap between gene lists
 
-First, study genes without a HGNC code. These are likely old gene names.
+First, study genes without a HGNC code. These are likely old gene names and should not be in the table.
 
 ```{r}
 gene_metadata_merged |>
-  filter(is.na(HGNC_ID))
+  filter(is.na(hgnc_id))
 ```
 
-Check if any of these are in our SNVs, fusions, or other lists of interest.
+Next, prepare the data for visualization in an UpSet plot, where assessed genes have value 1 and not assessed genes value 0. 
 
 Code based on: <https://upset.app/> and <https://github.com/hms-dbmi/UpSetR?tab=readme-ov-file>.
 
 ```{r}
 data_for_upsetplot <- gene_metadata_merged |>
-  select(-"NCBI_Gene_ID", -"Ensembl_gene_ID", -"HGNC_ID") |>
+  select(gene_symbol, all_of(metadata_sheets)) |>
   rowwise() |>
   mutate(
     across(-gene_symbol, \(x) case_when(x == "not assessed" ~ as.integer(0),
@@ -152,13 +161,13 @@ if (any(is.na(data_for_upsetplot))) stop()
 head(data_for_upsetplot)
 ```
 
+Quality control: look at some values:
+
 ```{r}
 table(data_for_upsetplot$Archer)
 ```
 
 ```{r}
-library(UpSetR)
-
 index_table
 ```
 
