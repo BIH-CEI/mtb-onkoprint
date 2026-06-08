@@ -8,7 +8,6 @@ __pycache__/
 
 # Related to R
 .Rproj.user
-*.Rproj
 .Rhistory
 ## Quarto reports
 *.html
