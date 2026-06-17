@@ -83,6 +83,34 @@ set_assessment_value <- function(SNV_value, patient_index, col_name) {
 }
 
 
+get_patients_assessed_per_gene <- function(list_of_genes_assessed_per_patient){
+  # Adapted based on code suggestion from ChatGPT:
+  
+  # All genes assessed
+  possible_values <- list_of_genes_assessed_per_patient |>
+    unlist() |>
+    unique() |>
+    setdiff("all_assessed") |>
+    sort()
+  
+  
+  df <- imap_dfr(list_of_genes_assessed_per_patient, \(vals, id) {
+    tibble(ID = id) |>
+      bind_cols(
+        setNames(
+          lapply(
+            possible_values,
+            \(v) as.integer(v %in% vals || "all_assessed" %in% vals)
+          ),
+          possible_values
+        ) |>
+          as_tibble()
+      ) |>
+      mutate(all_assessed = as.integer("all_assessed" %in% vals))
+  })
+  return(df)
+}
+
 # Testing if code works. Unit-test like
 
 # get_all_SNV_platforms("CGP, OFA")

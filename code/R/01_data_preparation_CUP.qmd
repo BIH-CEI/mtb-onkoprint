@@ -68,6 +68,14 @@ colnames(CUP_data)
 (nr_of_samples <- nrow(CUP_data))
 ```
 
+Create an output directory using the cohort name and datestamp
+```{r}
+if (!dir.exists(file.path(file_location, "output"))) dir.create(file.path(file_location, "output"))
+
+output_dir <- file.path(file_location, "output", str_c(Sys.Date(), cohort_name, sep = "_"))
+if (!dir.exists(output_dir)) dir.create(output_dir)
+```
+
 Study the data structure
 
 ```{r}
@@ -161,7 +169,7 @@ all_SNVs <- CUP_data_wrangled |>
   remove_missing() |>
   arrange(gene_symbol)
 
-output_file <- file.path(file_location, "output", str_glue("all_SNVs_{cohort_name}.csv"))
+output_file <- file.path(output_dir, str_glue("all_SNVs_{cohort_name}.csv"))
 print(paste("Saving to...", output_file))
 write_csv(all_SNVs,
   file = output_file,
@@ -199,6 +207,19 @@ CUP_data_wrangled <- CUP_data_wrangled |>
 CUP_data_wrangled |>
   select(CUPID, Methods, contains("SNV")) |>
   head(3)
+```
+
+#### Create a small report with the nr of assessed genes per patient
+
+```{r}
+stopifnot(length(genes_assessed_per_patient) == nrow(CUP_data_wrangled))
+names(genes_assessed_per_patient) <- CUP_data_wrangled$CUPID
+
+## Patients assessed per gene?
+assessed_SNVs_per_patient <- get_patients_assessed_per_gene(genes_assessed_per_patient) |>
+  rename(CUPID = ID) |>
+  mutate(CUPID = paste0("Patient ", CUPID))
+
 ```
 
 #### Quality control
@@ -345,6 +366,18 @@ CUP_data_wrangled |>
   head(3)
 ```
 
+#### Create a small report with the nr of assessed genes per patient
+
+```{r}
+stopifnot(length(genes_assessed_per_patient) == nrow(CUP_data_wrangled))
+names(genes_assessed_per_patient) <- CUP_data_wrangled$CUPID
+
+## Patients assessed per gene?
+assessed_fusions_per_patient <- get_patients_assessed_per_gene(genes_assessed_per_patient) |>
+  rename(CUPID = ID) |>
+  mutate(CUPID = paste0("Patient ", CUPID))
+```
+
 ## Sort per gene and transpose table
 
 For now the sorting is alphabetical.
@@ -374,22 +407,24 @@ sort_and_transpose_table <- function(CUP_data_wrangled){
   
   print(colnames(CUP_data_transposed))
   print(head(CUP_data_transposed, 1))
+  return(CUP_data_transposed)
 }
 CUP_data_transposed <- sort_and_transpose_table(CUP_data_wrangled)
 ```
 
 ## Save preprocessed data
 
+Save files
+
 ```{r}
-if (!dir.exists(file.path(file_location, "output"))) dir.create(file.path(file_location, "output"))
-output_file <- file.path(file_location, "output", str_replace(input_excel, ".xlsx$", "_preprocessed.csv"))
+output_file <- file.path(output_dir, str_replace(input_excel, ".xlsx$", "_preprocessed.csv"))
 print(paste("Saving to...", output_file))
 write_csv(CUP_data_wrangled,
   file = output_file,
   na = ""
 )
 
-output_file <- file.path(file_location, "output", str_replace(input_excel, ".xlsx$", "_transposed.csv"))
+output_file <- file.path(output_dir, str_replace(input_excel, ".xlsx$", "_transposed.csv"))
 print(paste("Saving to...", output_file))
 write_csv(CUP_data_transposed,
   file = output_file,
@@ -439,14 +474,17 @@ define_KRAS_class <- function(KRAS_mut){
     .default = "KRAS non-G12C"
   )
 }
+
 CUP_data_wrangled_pergene <- CUP_data_wrangled |>
   # Replace specific mutations with the gene name
   # Assume that the first word of a SNV is the gene
   # Except to show the difference between KRAS G12C and other mutations
   # Or BRAF class I and III
   rowwise() |>
-  mutate(SNV_BRAF = define_BRAF_class(SNV_BRAF)) |>
-  mutate(SNV_KRAS = define_KRAS_class(SNV_KRAS)) |>
+  mutate(
+    across(any_of("SNV_BRAF"), define_BRAF_class),
+    across(any_of("SNV_KRAS"), define_KRAS_class)
+    )|>
   mutate(across(starts_with("SNV_"), \(x) case_when(
     # KRAS
     str_detect(x, "KRAS") ~ x,
@@ -500,17 +538,34 @@ CUP_data_transposed_pergene <- sort_and_transpose_table(CUP_data_wrangled_pergen
 ## Save preprocessed data
 
 ```{r}
-if (!dir.exists(file.path(file_location, "output"))) dir.create(file.path(file_location, "output"))
-output_file <- file.path(file_location, "output", str_replace(input_excel, ".xlsx$", "_preprocessed_pergene.csv"))
+output_file <- file.path(output_dir, str_replace(input_excel, ".xlsx$", "_preprocessed_pergene.csv"))
 print(paste("Saving to...", output_file))
 write_csv(CUP_data_wrangled_pergene,
   file = output_file,
   na = ""
 )
 
-output_file <- file.path(file_location, "output", str_replace(input_excel, ".xlsx$", "_transposed_pergene.csv"))
+output_file <- file.path(output_dir, str_replace(input_excel, ".xlsx$", "_transposed_pergene.csv"))
 print(paste("Saving to...", output_file))
 write_csv(CUP_data_transposed_pergene,
+  file = output_file,
+  na = ""
+)
+
+### Save the tables whether genes were assessed for SNV and fusion analysis
+
+
+output_file <- file.path(output_dir, 
+                         str_glue("assessed_SNVs_per_patient_{cohort_name}.csv"))
+print(paste("Saving to...", output_file))
+write_csv(assessed_SNVs_per_patient,
+  file = output_file,
+  na = ""
+)
+output_file <- file.path(output_dir,
+                         str_glue("assessed_fusions_per_patient_{cohort_name}.csv"))
+print(paste("Saving to...", output_file))
+write_csv(assessed_fusions_per_patient,
   file = output_file,
   na = ""
 )
