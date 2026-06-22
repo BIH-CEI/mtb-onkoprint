@@ -142,6 +142,8 @@ gene_metadata_merged |>
   filter(is.na(hgnc_id))
 ```
 
+### UpSet Plot visualization
+
 Next, prepare the data for visualization in an UpSet plot, where assessed genes have value 1 and not assessed genes value 0. 
 
 Code based on: <https://upset.app/> and <https://github.com/hms-dbmi/UpSetR?tab=readme-ov-file>.
@@ -212,29 +214,158 @@ p_upset_Fus <- data_for_upsetplot |>
 p_upset_Fus
 ```
 
-#### Save figures
+### Euler Plot visualization
+
+Using the eulerr R package (https://jolars.github.io/eulerr/)
+
+```{r}
+library(eulerr)
+
+data_for_eulerplot <- data_for_upsetplot |>
+  select(intersect(colnames(data_for_upsetplot), SNV_gene_lists)) |>
+  filter_out(if_all(everything(), \(x) x == 0))
+```
+
+
+The problem is that the 7 unique genes for DHS-3501Z are now missing. TODO discuss with Thomas what we want to keep.
+
+```{r}
+#| fig-height: 4.7 # 12 cm
+#| fig-width: 6.3 # 16 cm
+
+(p_euler_SNV <- plot(
+  euler(data_for_eulerplot),
+  edges = TRUE,
+  labels = TRUE,
+  quantities = list(cex = 0.7)
+)
+)
+
+(p_euler_SNV_bw <- plot(
+  euler(data_for_eulerplot),
+  fills = FALSE,
+  edges = TRUE,
+  labels = TRUE,
+  quantities = list(cex = 0.7)
+)
+)
+```
+
+```{r}
+data_for_eulerplot |> colnames()
+data_for_eulerplot |> 
+  select("OFA", "OFA plus", "DHS-3501Z", "CGP") |>
+  euler() |>
+  plot(quantities = TRUE)
+```
+
+### Bar Plot visualization
+
+Show overlap between techniques and genes in each list
+
+```{r}
+# Order from large to small
+sorted_platform_names <- colSums(data_for_eulerplot) |> 
+  sort(decreasing = TRUE) |> 
+  names()
+
+# Count overlap between techniques
+df_plot <- data_for_eulerplot |>
+  rownames_to_column("gene_symbol") |>
+  pivot_longer(
+    -gene_symbol,
+    names_to = "platform",
+    values_to = "assessed"
+  ) |>
+  group_by(gene_symbol) |>
+  mutate(n_platforms_assessed = sum(assessed == 1, na.rm = TRUE)) |>
+  ungroup() |>
+  filter(assessed == 1) |>
+  count(platform, n_platforms_assessed)
+
+# Plot
+p_bar <- df_plot |>
+  mutate(n_platforms_assessed = factor(n_platforms_assessed),
+         platform = factor(platform, levels = sorted_platform_names)) |>
+  ggplot(aes(x = platform, y = n, fill = n_platforms_assessed)) +
+  labs(x = "", y = "Number of assessed genes", fill = "Detected in nr. of platforms") +
+  theme_classic() +
+  theme(legend.position = "bottom",
+        panel.grid.major.y = element_line(color = "grey90")
+) +
+  guides(fill = guide_legend(nrow = 1))
+
+(p_bar1 <- p_bar + 
+  geom_col(color = "grey20") +
+  scale_fill_grey(start = 1, end = 0)
+)
+(p_bar2 <- p_bar + 
+  geom_col(color = "grey20") +
+  scale_fill_grey(start = 1, end = 0) +
+  geom_text(
+    aes(label = ifelse(n > 20, n, "")),
+    position = position_stack(vjust = 0.5),
+    size = 3
+  )
+)
+(p_bar3 <- p_bar + 
+  geom_col() +
+  scale_fill_grey(start = 0.9, end = 0)
+)
+(p_bar4 <- p_bar + 
+  geom_col() +
+  scale_fill_viridis_d(direction = -1)
+)
+```
+
+### Save figures
 
 ```{r}
 # Save as png and svg
-save_plot <- function(plot_obj, file_path, filename, verbose = TRUE){
+save_plot <- function(plot_obj, file_path, filename, verbose = TRUE,
+                      width = 16, height = 12
+                      ){
   png_file <- file.path(file_path, str_glue("{filename}.png"))
   svg_file <- file.path(file_path, str_glue("{filename}.svg"))
   if(verbose){
     print(str_glue("Saving PNG to: {png_file}"))
     print(str_glue("Saving SVG to: {svg_file}"))
   }
-  png(png_file, width = 16, height = 12, units = "cm", res = 300)
+  png(png_file, width = width, height = height, units = "cm", res = 300)
   show(plot_obj)
   dev.off()
   
-  svg(svg_file, width = 16/2.54, height = 12/2.54)
+  svg(svg_file, width = width/2.54, height = height/2.54)
   show(plot_obj)
   dev.off()
 }
+# UpSet plots
 save_plot(p_upset_Fus, 
           file.path(file_location, "output/gene_metadata"), 
           "upset_plot_fusions")
 save_plot(p_upset_SNV, 
           file.path(file_location, "output/gene_metadata"), 
           "upset_plot_SNVs")
+
+# Euler plots
+save_plot(p_euler_SNV, 
+          file.path(file_location, "output/gene_metadata"), 
+          "euler_plot_SNVs")
+save_plot(p_euler_SNV_bw, 
+          file.path(file_location, "output/gene_metadata"), 
+          "euler_plot_SNVs_bw")
+
+# Bar plots
+save_plot(p_bar1, 
+          file.path(file_location, "output/gene_metadata"), 
+          "bar_plot_SNVs_option1")
+save_plot(p_bar2, 
+          file.path(file_location, "output/gene_metadata"), 
+          "bar_plot_SNVs_option2")
+save_plot(p_bar3, 
+          file.path(file_location, "output/gene_metadata"), 
+          "bar_plot_SNVs_option3")
+save_plot(p_bar4, 
+          file.path(file_location, "output/gene_metadata"), 
+          "bar_plot_SNVs_option4")
 ```
