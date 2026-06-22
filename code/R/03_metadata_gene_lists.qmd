@@ -45,7 +45,7 @@ gene_identifier_table <- read_tsv(file.path(
 Read all sheets in the metadata table, except the index sheet.
 
 ```{r}
-input_metadata <- "metadata_panels_and_sequencing.xlsx"
+input_metadata <- "metadata_panels_and_sequencing_v1.0.xlsx"
 (input_metadata <- file.path(file_location, "data/gene_metadata", input_metadata))
 
 metadata_sheets <- setdiff(excel_sheets(input_metadata), "index")
@@ -80,6 +80,8 @@ dim(gene_metadata_merged)
 For the analysis with DKTK/MASTER or WGS, whole genome sequencing was used.
 
 This means (we assume) that all genes were measured. We could either add a list of genes (e.g >20.000 genes), or only include the genes listed in other assays in tables, and allow "all assessed" in further analyses.
+
+We have decided to keep this information in Figure captions and not include WGS/Master in the figure.
 
 ## Write to file
 
@@ -190,11 +192,10 @@ upset_plot <- function(df){
     mb.ratio = c(0.65, 0.35)
     )
 }
+
 p_upset_SNV <- data_for_upsetplot |>
   select(intersect(colnames(data_for_upsetplot), SNV_gene_lists)) |>
-  # Everything is measured in WGS and in MASTER, but that is >20.000 genes so only include overlap with other panels. Keep all rows with at least one 1, and set all for WGS to 1:
   filter_out(if_all(everything(), \(x) x == 0)) |>
-  mutate("WGS-MASTER" = as.integer(1)) |>
   upset_plot()
 p_upset_SNV
 
@@ -207,7 +208,6 @@ Fusion_gene_lists <- index_table |>
 p_upset_Fus <- data_for_upsetplot |>
   select(intersect(colnames(data_for_upsetplot), Fusion_gene_lists)) |>
   filter_out(if_all(everything(), \(x) x == 0)) |>
-  mutate("WGS-MASTER" = as.integer(1)) |>
   upset_plot()
 p_upset_Fus
 ```
