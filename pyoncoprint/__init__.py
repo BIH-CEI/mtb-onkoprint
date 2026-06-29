@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 
@@ -104,12 +106,14 @@ class OncoPrint:
                   rightplot=True,
                   legend=True,
                   legend_groups=None,
+                  legend_layout=None,
                   legend_columns=4,
                   legend_font_size=9,
                   legend_swatch_size=0.6,
                   legend_scaler_style="stepped",
                   cell_background="#dddddd", gap=0.3,
                   ratio_template="{0:.0%}",
+                  strict_markers=False,
                   **kwargs):
 
         if 'is_topplot' in kwargs:
@@ -119,6 +123,7 @@ class OncoPrint:
         if 'is_legend' in kwargs:
             legend = kwargs['is_legend']
 
+        self.unknown_markers = set()
         mutation_types = [b[0] for b in sorted(markers.items(), key=lambda a: a[1].get('zindex', 1))]
         self.sorted_mat = self.mat.copy()
         self.sorted_genes = self.genes.copy()
@@ -155,7 +160,7 @@ class OncoPrint:
                     counts_left[i] += 1
                     for mut in np.unique(self.sorted_mat[i, j].split(self.seperator)):
                         if mut not in mutation_types:
-                            print("Warning: Marker for mutation type '%s' is not defined. It will be ignored." % mut)
+                            self.unknown_markers.add(mut)
                             continue
                         stacked_counts_top[mutation_types.index(mut), j] += 1
                         stacked_counts_right[mutation_types.index(mut), i] += 1
@@ -169,6 +174,16 @@ class OncoPrint:
                         else:
                             scatter_mutations[mut][0].append(j)
                             scatter_mutations[mut][1].append(i)
+
+        if self.unknown_markers:
+            msg = (
+                "Marker style not defined for: "
+                + ", ".join(repr(v) for v in sorted(self.unknown_markers))
+                + ". These values will be ignored in the plot."
+            )
+            if strict_markers:
+                raise ValueError(msg)
+            warnings.warn(msg, stacklevel=2)
 
         ax_height = self.sorted_mat.shape[0]
         heatmap_patches = []
@@ -376,7 +391,8 @@ class OncoPrint:
                     legend_groups, flag_annot, sorted_annotations if flag_annot else [],
                     heatmaps, rightplot,
                     legend_columns, legend_font_size, legend_swatch_size,
-                    legend_scaler_style, cell_background)
+                    legend_scaler_style, cell_background,
+                    legend_layout=legend_layout)
             else:
                 ax_legend = self._render_flat_legend(
                     f, ax, ax_divider, ax_xlim, gap, background_lengths,
@@ -536,7 +552,8 @@ class OncoPrint:
                                legend_groups, flag_annot, sorted_annotations,
                                heatmaps, rightplot,
                                legend_columns, legend_font_size, legend_swatch_size,
-                               legend_scaler_style, cell_background):
+                               legend_scaler_style, cell_background,
+                               legend_layout=None):
         """Structured grouped legend renderer.
 
         legend_groups: list of (group_title, [(marker_key, display_label), ...])
@@ -566,6 +583,7 @@ class OncoPrint:
         legend_pcs = []
         legend_texts = []
         legend_scatters = []
+        legend_abs = []
         legend_section_labels = []
 
         # Collect annotation groups to add after marker groups
@@ -576,155 +594,238 @@ class OncoPrint:
                     continue
                 annot_groups.append((annot_type, annot_dic))
 
-        # Layout: arrange legend_groups in columns, wrapping every legend_columns groups
-        all_groups = list(legend_groups)  # marker groups from config
+        # ----- Group rendering helpers (shared by grid and declarative layout) -----
 
-        # Calculate layout: each group occupies one column slot
-        cur_row_start_y = pad_y
-        group_idx = 0
-        max_y = pad_y
-
-        while group_idx < len(all_groups):
-            row_groups = all_groups[group_idx:group_idx + legend_columns]
-            row_max_y = cur_row_start_y
-
-            for col_idx, (group_title, entries) in enumerate(row_groups):
-                col_x = ax_xlim[0] + pad_x + col_idx * col_width
-                cur_y = cur_row_start_y
-
-                # Group title
-                legend_texts.append((group_title,
-                                     col_x + text_left_offset,
-                                     cur_y + text_top_offset + 0.5 + text_height / 2.0,
-                                     {'weight': 'bold', 'size': legend_font_size}))
-                cur_y += line_height + group_internal_gap
-
-                # Entries
-                for marker_key, display_label in entries:
-                    # Draw swatch
-                    swatch_x = col_x
-                    swatch_y = cur_y
-
-                    # Background swatch
-                    bg_patch = Rectangle((swatch_x, swatch_y), swatch_size, swatch_size,
-                                         color=cell_background, lw=0)
-                    legend_patches.append(bg_patch)
-
-                    # Overlay marker swatch
-                    if marker_key in markers:
-                        ms = markers[marker_key]
-                        mk = ms['marker']
-                        if isinstance(mk, str) and mk in ('fill', 'rect'):
-                            p = Rectangle((swatch_x, swatch_y), swatch_size, swatch_size,
-                                          color=ms['color'], lw=0)
-                            legend_patches.append(p)
-                        elif isinstance(mk, Patch):
-                            p = copy(mk)
-                            w = swatch_size * ms.get('width', 1.0)
-                            h = swatch_size * ms.get('height', 1.0)
-                            pc_kwargs = {k: v for k, v in ms.items()
-                                         if k not in ('marker', 'width', 'height', 'zindex')}
-                            p.set_transform(
-                                p.get_transform()
-                                + Affine2D().scale(w, -h)
-                                .translate(swatch_x + swatch_size * 0.5 - w * 0.5,
-                                           swatch_y + swatch_size * 0.5 + h * 0.5))
-                            legend_pcs.append(PatchCollection([p], **pc_kwargs))
-
-                    # Label text
-                    legend_texts.append((display_label,
-                                         swatch_x + swatch_size + tw_space * 2 + text_left_offset,
-                                         swatch_y + text_top_offset + swatch_size / 2.0 + text_height / 2.0,
-                                         {'size': legend_font_size}))
-                    cur_y += line_height + group_internal_gap * 0.5
-
-                row_max_y = max(row_max_y, cur_y)
-
-            cur_row_start_y = row_max_y + row_gap
-            max_y = cur_row_start_y
-            group_idx += legend_columns
-
-        # Add annotation groups (Entity, Rare Tumor, scalers)
-        if annot_groups:
-            annot_row_y = max_y
-            annot_col = 0
-            for annot_type, annot_dic in annot_groups:
-                if annot_col >= legend_columns:
-                    annot_col = 0
-                    annot_row_y = max_y + row_gap
-
-                col_x = ax_xlim[0] + pad_x + annot_col * col_width
-                cur_y = annot_row_y
-
-                # Title
-                legend_texts.append((annot_type,
-                                     col_x + text_left_offset,
-                                     cur_y + text_top_offset + 0.5 + text_height / 2.0,
-                                     {'weight': 'bold', 'size': legend_font_size}))
-                cur_y += line_height + group_internal_gap
-
-                if 'colors' in annot_dic:
-                    annot_colors = annot_dic['colors']
-                    for annot_label, annot_color in sorted(annot_colors.items(), key=lambda e: e[0]):
-                        bg_patch = Rectangle((col_x, cur_y), swatch_size, swatch_size,
-                                             color=annot_color, lw=0)
-                        legend_patches.append(bg_patch)
-                        legend_texts.append((annot_label,
-                                             col_x + swatch_size + tw_space * 2 + text_left_offset,
-                                             cur_y + text_top_offset + swatch_size / 2.0 + text_height / 2.0,
-                                             {'size': legend_font_size}))
-                        cur_y += line_height + group_internal_gap * 0.5
-                else:
-                    # Numeric scaler
-                    gmin = annot_dic['annotations'].values.ravel().min()
-                    gmax = annot_dic['annotations'].values.ravel().max()
-                    col = annot_dic.get('color', 'grey')
-
-                    if legend_scaler_style == "stepped" and gmax > 0:
-                        int_max = int(gmax)
-                        step_width = swatch_size
-                        for val in range(int_max + 1):
-                            step_x = col_x + val * (step_width + tw_space * 0.5)
-                            if int_max > 0:
-                                step_height = swatch_size * (val / int_max) if val > 0 else swatch_size * 0.05
-                            else:
-                                step_height = swatch_size
-                            step_y_offset = swatch_size - step_height
-                            # Background
-                            bg = Rectangle((step_x, cur_y), step_width, swatch_size,
-                                           color=cell_background, lw=0)
-                            legend_patches.append(bg)
-                            # Fill
-                            fill = Rectangle((step_x, cur_y + step_y_offset), step_width, step_height,
-                                             color=col, lw=0)
-                            legend_patches.append(fill)
-                            # Label below
-                            legend_texts.append((str(val),
-                                                 step_x + text_left_offset + step_width * 0.3,
-                                                 cur_y + swatch_size + text_height * 0.5 + text_top_offset,
-                                                 {'size': legend_font_size - 1}))
-                        cur_y += swatch_size + text_height + group_internal_gap
-                    else:
-                        # Triangular slope scaler
-                        scaler_width = swatch_size * 8
-                        p = Polygon((
-                            (col_x, cur_y + swatch_size),
-                            (col_x + scaler_width, cur_y + swatch_size),
-                            (col_x + scaler_width, cur_y)
-                        ), color=col, lw=0)
+        def _render_marker_group(group_title, entries, col_x, cur_y):
+            """Render a marker legend group. Returns updated cur_y."""
+            legend_texts.append((group_title,
+                                 col_x + text_left_offset,
+                                 cur_y + text_top_offset + 0.5 + text_height / 2.0,
+                                 {'weight': 'bold', 'size': legend_font_size}))
+            cur_y += line_height + group_internal_gap
+            for marker_key, display_label in entries:
+                swatch_x = col_x
+                swatch_y = cur_y
+                bg_patch = Rectangle((swatch_x, swatch_y), swatch_size, swatch_size,
+                                     color=cell_background, lw=0)
+                legend_patches.append(bg_patch)
+                if marker_key in markers:
+                    ms = markers[marker_key]
+                    mk = ms['marker']
+                    if isinstance(mk, str) and mk in ('fill', 'rect'):
+                        p = Rectangle((swatch_x, swatch_y), swatch_size, swatch_size,
+                                      color=ms['color'], lw=0)
                         legend_patches.append(p)
-                        legend_texts.append(("%.0f" % gmin,
-                                             col_x + text_left_offset - tw_space,
-                                             cur_y + text_top_offset + swatch_size / 2.0 + text_height / 2.0,
-                                             {'size': legend_font_size}))
-                        legend_texts.append(("%.0f" % gmax,
-                                             col_x + scaler_width + tw_space + text_left_offset,
-                                             cur_y + text_top_offset + swatch_size / 2.0 + text_height / 2.0,
-                                             {'size': legend_font_size}))
-                        cur_y += swatch_size + group_internal_gap
+                    elif isinstance(mk, Patch):
+                        p = copy(mk)
+                        w = swatch_size * ms.get('width', 1.0)
+                        h = swatch_size * ms.get('height', 1.0)
+                        pc_kwargs = {mk_k: mk_v for mk_k, mk_v in ms.items()
+                                     if mk_k not in ('marker', 'width', 'height', 'zindex')}
+                        p.set_transform(
+                            p.get_transform()
+                            + Affine2D().scale(w, -h)
+                            .translate(swatch_x + swatch_size * 0.5 - w * 0.5,
+                                       swatch_y + swatch_size * 0.5 + h * 0.5))
+                        legend_pcs.append(PatchCollection([p], **pc_kwargs))
+                legend_texts.append((display_label,
+                                     swatch_x + swatch_size + tw_space * 2 + text_left_offset,
+                                     swatch_y + text_top_offset + swatch_size / 2.0 + text_height / 2.0,
+                                     {'size': legend_font_size}))
+                cur_y += line_height + group_internal_gap * 0.5
+            return cur_y
 
-                max_y = max(max_y, cur_y + row_gap)
-                annot_col += 1
+        def _render_annot_color_group(annot_type, annot_dic, col_x, cur_y):
+            """Render a color-swatch annotation group. Returns updated cur_y."""
+            legend_texts.append((annot_type,
+                                 col_x + text_left_offset,
+                                 cur_y + text_top_offset + 0.5 + text_height / 2.0,
+                                 {'weight': 'bold', 'size': legend_font_size}))
+            cur_y += line_height + group_internal_gap
+            annot_colors = annot_dic['colors']
+            lo = annot_dic.get('legend_order')
+            if lo is not None:
+                items = [(lk, annot_colors[lk]) for lk in lo if lk in annot_colors]
+            else:
+                items = sorted(annot_colors.items(), key=lambda e: e[0])
+            for annot_label, annot_color in items:
+                bg_patch = Rectangle((col_x, cur_y), swatch_size, swatch_size,
+                                     color=annot_color, lw=0)
+                legend_patches.append(bg_patch)
+                legend_texts.append((annot_label,
+                                     col_x + swatch_size + tw_space * 2 + text_left_offset,
+                                     cur_y + text_top_offset + swatch_size / 2.0 + text_height / 2.0,
+                                     {'size': legend_font_size}))
+                cur_y += line_height + group_internal_gap * 0.5
+            return cur_y
+
+        def _render_annot_scaler_group(annot_type, annot_dic, col_x, cur_y):
+            """Render a numeric scaler annotation group. Returns updated cur_y."""
+            legend_texts.append((annot_type,
+                                 col_x + text_left_offset,
+                                 cur_y + text_top_offset + 0.5 + text_height / 2.0,
+                                 {'weight': 'bold', 'size': legend_font_size}))
+            cur_y += line_height + group_internal_gap
+            gmin = annot_dic['annotations'].values.ravel().min()
+            gmax = annot_dic['annotations'].values.ravel().max()
+            scaler_col = annot_dic.get('color', 'grey')
+            if legend_scaler_style == "stepped" and gmax > 0:
+                int_max = int(gmax)
+                step_width = swatch_size
+                step_gap = swatch_size * 0.6
+                for val in range(int_max + 1):
+                    step_x = col_x + val * (step_width + step_gap)
+                    if int_max > 0:
+                        step_height = swatch_size * (val / int_max) if val > 0 else swatch_size * 0.05
+                    else:
+                        step_height = swatch_size
+                    step_y_offset = swatch_size - step_height
+                    bg = Rectangle((step_x, cur_y), step_width, swatch_size,
+                                   color=cell_background, lw=0)
+                    legend_patches.append(bg)
+                    fill = Rectangle((step_x, cur_y + step_y_offset), step_width, step_height,
+                                     color=scaler_col, lw=0)
+                    legend_patches.append(fill)
+                    legend_texts.append((str(val),
+                                         step_x + text_left_offset + step_width * 0.3,
+                                         cur_y + swatch_size + text_height * 1.2,
+                                         {'size': legend_font_size - 1}))
+                cur_y += swatch_size + text_height + group_internal_gap
+            else:
+                scaler_width = swatch_size * 8
+                p = Polygon((
+                    (col_x, cur_y + swatch_size),
+                    (col_x + scaler_width, cur_y + swatch_size),
+                    (col_x + scaler_width, cur_y)
+                ), color=scaler_col, lw=0)
+                legend_patches.append(p)
+                legend_texts.append(("%.0f" % gmin,
+                                     col_x + text_left_offset - tw_space,
+                                     cur_y + text_top_offset + swatch_size / 2.0 + text_height / 2.0,
+                                     {'size': legend_font_size}))
+                legend_texts.append(("%.0f" % gmax,
+                                     col_x + scaler_width + tw_space + text_left_offset,
+                                     cur_y + text_top_offset + swatch_size / 2.0 + text_height / 2.0,
+                                     {'size': legend_font_size}))
+                cur_y += swatch_size + group_internal_gap
+            return cur_y
+
+        def _render_heatmap_group(hm_key, hm_val, col_x, cur_y):
+            """Render a heatmap gradient legend group. Returns updated cur_y."""
+            legend_texts.append((hm_key,
+                                 col_x + text_left_offset,
+                                 cur_y + text_top_offset + 0.5 + text_height / 2.0,
+                                 {'weight': 'bold', 'size': legend_font_size}))
+            cur_y += line_height + group_internal_gap
+            vmin = hm_val.get('vmin', hm_val['heatmap'].min().min())
+            vmax = hm_val.get('vmax', hm_val['heatmap'].max().max())
+            if isinstance(hm_val['cmap'], str):
+                hm_cmap = plt.get_cmap(hm_val['cmap'])
+            else:
+                hm_cmap = hm_val['cmap']
+            scaler_image = np.tile(hm_cmap(np.linspace(0, 1, 256))[:, :3], (80, 1, 1))
+            imagebox = OffsetImage(scaler_image, zoom=0.3)
+            ab = AnnotationBbox(imagebox,
+                                (col_x + text_left_offset,
+                                 cur_y + swatch_size * 0.5),
+                                box_alignment=(0, 0.5), frameon=False)
+            legend_abs.append(ab)
+            scaler_width = swatch_size * 8
+            legend_texts.append(("%.0f" % vmin,
+                                 col_x + text_left_offset - tw_space,
+                                 cur_y + text_top_offset + swatch_size / 2.0 + text_height / 2.0,
+                                 {'size': legend_font_size}))
+            legend_texts.append(("%.0f" % vmax,
+                                 col_x + scaler_width + tw_space + text_left_offset,
+                                 cur_y + text_top_offset + swatch_size / 2.0 + text_height / 2.0,
+                                 {'size': legend_font_size}))
+            cur_y += swatch_size + group_internal_gap
+            return cur_y
+
+        # ----- Build group lookup map (name → tagged data) -----
+
+        all_group_map = {}
+        for group_title, entries in legend_groups:
+            all_group_map[group_title] = ('marker', (group_title, entries))
+        for annot_type, annot_dic in annot_groups:
+            gtype = 'annot_color' if 'colors' in annot_dic else 'annot_scaler'
+            all_group_map[annot_type] = (gtype, (annot_type, annot_dic))
+        for hm_k, hm_v in heatmaps.items():
+            if len(hm_v['heatmap']) > 0:
+                all_group_map[hm_k] = ('heatmap', (hm_k, hm_v))
+
+        def _render_group(group_type, group_data, col_x, cur_y):
+            """Dispatch to the appropriate group renderer."""
+            if group_type == 'marker':
+                return _render_marker_group(*group_data, col_x, cur_y)
+            elif group_type == 'annot_color':
+                return _render_annot_color_group(*group_data, col_x, cur_y)
+            elif group_type == 'annot_scaler':
+                return _render_annot_scaler_group(*group_data, col_x, cur_y)
+            elif group_type == 'heatmap':
+                return _render_heatmap_group(*group_data, col_x, cur_y)
+            return cur_y
+
+        # ----- Layout -----
+
+        if legend_layout is not None:
+            # Declarative row-based layout: each row has its own column count
+            max_y = pad_y
+            for row_names in legend_layout:
+                row_groups = [(name, all_group_map[name])
+                              for name in row_names if name in all_group_map]
+                if not row_groups:
+                    continue
+                row_col_width = plot_width / len(row_groups)
+                row_max_y = max_y
+                for col_idx, (_, (group_type, group_data)) in enumerate(row_groups):
+                    col_x = ax_xlim[0] + pad_x + col_idx * row_col_width
+                    cur_y = _render_group(group_type, group_data, col_x, max_y)
+                    row_max_y = max(row_max_y, cur_y)
+                max_y = row_max_y + row_gap
+        else:
+            # Grid-based layout (fallback): legend_columns groups per row,
+            # then annotations, then heatmaps
+            all_marker_groups = list(legend_groups)
+            cur_row_start_y = pad_y
+            group_idx = 0
+            max_y = pad_y
+
+            while group_idx < len(all_marker_groups):
+                row_slice = all_marker_groups[group_idx:group_idx + legend_columns]
+                row_max_y = cur_row_start_y
+                for col_idx, (group_title, entries) in enumerate(row_slice):
+                    col_x = ax_xlim[0] + pad_x + col_idx * col_width
+                    cur_y = _render_marker_group(group_title, entries, col_x, cur_row_start_y)
+                    row_max_y = max(row_max_y, cur_y)
+                cur_row_start_y = row_max_y + row_gap
+                max_y = cur_row_start_y
+                group_idx += legend_columns
+
+            if annot_groups:
+                annot_col = 0
+                for annot_type, annot_dic in annot_groups:
+                    if annot_col >= legend_columns:
+                        annot_col = 0
+                        max_y += row_gap
+                    col_x = ax_xlim[0] + pad_x + annot_col * col_width
+                    gtype = 'annot_color' if 'colors' in annot_dic else 'annot_scaler'
+                    cur_y = _render_group(gtype, (annot_type, annot_dic), col_x, max_y)
+                    max_y = max(max_y, cur_y + row_gap)
+                    annot_col += 1
+
+            if len(heatmaps) > 0:
+                hm_col = 0
+                for hm_k, hm_v in heatmaps.items():
+                    if len(hm_v['heatmap']) == 0:
+                        continue
+                    if hm_col >= legend_columns:
+                        hm_col = 0
+                        max_y += row_gap
+                    col_x = ax_xlim[0] + pad_x + hm_col * col_width
+                    cur_y = _render_heatmap_group(hm_k, hm_v, col_x, max_y)
+                    max_y = max(max_y, cur_y + row_gap)
+                    hm_col += 1
 
         ax_legend_height = max_y + 0.5
         ax_legend_height_ratio = ax_legend_height / (len(self.sorted_genes) - gap[1])
@@ -741,6 +842,8 @@ class OncoPrint:
         ax_legend.add_collection(PatchCollection(legend_patches, match_original=True))
         for pc in legend_pcs:
             ax_legend.add_collection(pc)
+        for ab in legend_abs:
+            ax_legend.add_artist(ab)
         for item in legend_texts:
             if len(item) == 4:
                 text, x, y, fontdict = item

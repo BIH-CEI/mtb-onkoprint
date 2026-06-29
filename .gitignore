@@ -5,9 +5,13 @@ output/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+*.ipynb
+.env
+.venv
 
 # Related to R
 .Rproj.user
 .Rhistory
+
 ## Quarto reports
 *.html
