@@ -16,7 +16,7 @@ This repository includes data preparation scripts in Python or R, and a python-b
 -   [Build your own Onkoprint](#build-your-own-onkoprint)
 -   [License & Citation](#license)
 
-## Installation instructions {#installation-instructions}
+## Installation instructions
 
 ### Project Requirements and Dependencies
 
@@ -35,13 +35,13 @@ cd mtb-onkoprint
 
 *To be written*
 
-## Workflow overview {#workflow-overview}
+## Workflow overview
 
 The workflow has two main steps.
 
 1.  **Data preparation**
 
-    The data-preparation scripts read cohort-specific MTB source data from `data/`, clean values, standardize gene/modality annotations, split or detect modalities, validate marker values, and write intermediate CSV files to `output/`.
+    The data-preparation script reads cohort-specific MTB source data from `data/`, cleans values, standardizes gene/modality annotations, splits or detect modalities, validates marker values, and writes intermediate CSV files to `output/`.
 
     Main outputs include:
 
@@ -55,7 +55,7 @@ The workflow has two main steps.
 
 2.  **Visualization**
 
-    The visualization scripts read the intermediate CSV files, apply cohort-specific annotation settings, construct the OncoPrint matrix, add clinical annotations, render the OncoPrint, and save the figure as PNG and SVG.
+    The visualization script reads the intermediate CSV files, applies cohort-specific annotation settings, constructs the OnkoPrint matrix, add clinical annotations, renders the OnkoPrint, and saves the figure as PNG and SVG.
 
     Main outputs include:
 
@@ -66,11 +66,18 @@ The workflow has two main steps.
 
 ### Expected input
 
-Input files are expected in a local `data/` directory. These files are not included in the repository, but example (synthetic, not real) data and expected outputs are. (example_data_CUP.xlsx)
+Input files are expected in a local `data/` directory. These files are not included in the repository, but example (synthetic, not real) data and expected outputs will be added soon (example_data.xlsx).
+
+The data should be as follows:
+
+-   each row contains one variable, and each column is a patient.
+-   Sequence variants (gene signatures, fusions, SNVs, Deletions, and so on) need to be sorted per gene. The naming convention we used is `<gene><underscore><alteration type>`, for example `BRAF_SNV`.
+-   Values of clinical metadata can be factors (for example `Sex (M/F)` with values `M` and `F`) or numeric.
+-   For sequence variants, one should either specify: `assessed`, `not assessed`, or a value. `assessed` means that a method was performed for the gene to study if it was altered, and the result is "not altered". `not assessed` means that the method was not performed, meaning that we do not know whether there is an alteration. If a SNV was found, or a deletion, or a quantification of immunohistochemistry, or something else, one can either specify a numeric `value`, for example `HER2_IHC` has value 2, a specific mutation (ideally using the [HGVS Nomenclature](https://hgvs-nomenclature.org/stable/)) or just the gene name. The difference between `assessed` and `not assessed` can then be visualized in the OnkoPrint with different greyscale colors.
 
 ### Using Jupyter Notebooks
 
-The scripts are Jupytext-compatible Python notebooks. To convert a script to an `.ipynb` notebook:
+The python scripts should be [Jupytext](https://jupytext.org/)-compatible Python notebooks. To convert a script to an `.ipynb` notebook:
 
 ``` bash
 jupytext --to ipynb 01_data_preparation.py
@@ -86,15 +93,15 @@ jupytext --to ipynb 02_visualization_CUP.py
 
 Alternatively, open the `.py` files directly in a Jupyter/Jupytext-enabled editor.
 
-## Notes on sensitive data {#notes-on-sensitive-data}
+## Notes on sensitive data
 
 The repository is designed to operate on local cohort data stored in `data/`. Do not commit patient-level source files, generated identifiable outputs, or local environment files.
 
-## Build your own Onkoprint {#build-your-own-onkoprint}
+## Build your own Onkoprint
 
-See the to-be-written [Tutorial](docs/Tutorial.md) for more details on preparing your own data.
+We aim to write a [Tutorial](docs/Tutorial.md) with more details on preparing your own data.
 
-## License & Citation {#license}
+## License & Citation
 
 The license can be found here: [License](LICENSE).
 
