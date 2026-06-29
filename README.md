@@ -1,3 +1,9 @@
+---
+editor_options:
+  markdown:
+    mode: gfm
+---
+
 # MTB Onkoprint
 
 ## Project description
@@ -20,20 +26,31 @@ This repository includes data preparation scripts in Python or R, and a python-b
 
 ### Project Requirements and Dependencies
 
-The MTB-Onkoprint uses the [PyOncoPrint package](#0). For this, Python is required and all packages in [requirements.txt](requirements.txt).
+The MTB-Onkoprint uses the [PyOncoPrint package](https://doi.org/10.5808/gi.22079). For this, Python is required and all packages in [requirements.txt](requirements.txt).
 
 Data preparation can be performed using Python or R, or performed manually.
 
 ### Installation
 
-Clone the repository:
+Clone the repository and create a virtual environment with packages specified in the requirements.txt file:
 
 ``` bash
 git clone https://github.com/BIH-CEI/mtb-onkoprint.git
 cd mtb-onkoprint
+# Unix/macOS
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+
+# Windows using Git Bash
+py -m venv .venv
+source .venv/Scripts/activate
+py -m pip install -r requirements.txt
 ```
 
-*To be written*
+Activate the virtual environment:
+
+More information on creating virtual environments from a requirements.txt file can be found on the [python](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/#using-a-requirements-file) website.
 
 ## Workflow overview
 
@@ -46,8 +63,8 @@ The workflow has two main steps.
     Main outputs include:
 
     ``` text
-    output/<DATE>_<COHORT>_Entities.csv
-    output/<DATE>_<COHORT>_Therapy.csv
+    output/<DATE>_<COHORT>_clinical.csv
+    output/<DATE>_<COHORT>_ihc_heatmap.csv
     output/<DATE>_<COHORT>_complex.csv
     output/<DATE>_gene-data-single-rows.csv
     output/<DATE>_gene-data-aggregated-rows.csv
@@ -75,9 +92,11 @@ The data should be as follows:
 -   Values of clinical metadata can be factors (for example `Sex (M/F)` with values `M` and `F`) or numeric.
 -   For sequence variants, one should either specify: `assessed`, `not assessed`, or a value. `assessed` means that a method was performed for the gene to study if it was altered, and the result is "not altered". `not assessed` means that the method was not performed, meaning that we do not know whether there is an alteration. If a SNV was found, or a deletion, or a quantification of immunohistochemistry, or something else, one can either specify a numeric `value`, for example `HER2_IHC` has value 2, a specific mutation (ideally using the [HGVS Nomenclature](https://hgvs-nomenclature.org/stable/)) or just the gene name. The difference between `assessed` and `not assessed` can then be visualized in the OnkoPrint with different greyscale colors.
 
+Code for other data input formats is currently under development.
+
 ### Using Jupyter Notebooks
 
-The python scripts should be [Jupytext](https://jupytext.org/)-compatible Python notebooks. To convert a script to an `.ipynb` notebook:
+The python scripts are [Jupytext](https://jupytext.org/)-compatible Python notebooks. To convert a script to an `.ipynb` notebook:
 
 ``` bash
 jupytext --to ipynb 01_data_preparation.py
