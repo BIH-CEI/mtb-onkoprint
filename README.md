@@ -1,9 +1,3 @@
----
-editor_options:
-  markdown:
-    mode: gfm
----
-
 # MTB Onkoprint
 
 ## Project description
