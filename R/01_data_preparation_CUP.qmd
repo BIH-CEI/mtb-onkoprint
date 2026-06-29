@@ -1,0 +1,572 @@
+---
+title: "01_data_preparation_CUP"
+date: "`r Sys.Date()`"
+engine: knitr
+format: 
+  html:
+    self-contained: true
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    df-print: kable
+---
+
+## Introduction
+
+This script processes a dataset where mutations and structural variants are written
+in one column, split by comma's, to a new format where each gene has its own column.
+
+This can later be used for an onkoprint.
+
+## Preparation
+
+```{r}
+library(tidyverse)
+library(here)
+library(readxl)
+```
+
+Define functions
+
+```{r}
+df_wider_and_cleanup <- function(df) {
+  df <- df |>
+    mutate(col_name = str_replace_all(col_name, " ", "_")) |>
+    pivot_wider(
+      names_from = col_name,
+      values_from = value_name,
+      values_fill = NA,
+      values_fn = ~ paste(.x, collapse = "|")
+    )
+  if (any(colnames(df) == "NA")) {
+    df <- select(df, -"NA")
+  }
+  if (any(colnames(df) == "SNV_NA")) {
+    df <- select(df, -"SNV_NA")
+  }
+  return(df)
+}
+```
+
+## Load data
+
+```{r}
+file_location <- here()
+input_excel <- "Oncoprin_CUPxMTB_syntheticdata_V3.2.xlsx"
+
+# Already list the table of gene panels used. This is needed later to check whether genes were assessed
+gene_panels_tsv <- "metadata_panels_and_sequencing_synthetic.tsv"
+panel_per_platform_lookup_tsv <- "gene_panels_and_platform_names.tsv"
+study_date <- Sys.Date()
+cohort_name <- "CUP_synthetic"
+
+CUP_data <- read_excel(file.path(file_location, "data", input_excel))
+dim(CUP_data)
+head(CUP_data, 1)
+colnames(CUP_data)
+
+(nr_of_samples <- nrow(CUP_data))
+```
+
+Create an output directory using the cohort name and datestamp
+```{r}
+if (!dir.exists(file.path(file_location, "output"))) dir.create(file.path(file_location, "output"))
+
+output_dir <- file.path(file_location, "output", str_c(Sys.Date(), cohort_name, sep = "_"))
+if (!dir.exists(output_dir)) dir.create(output_dir)
+```
+
+Study the data structure
+
+```{r}
+CUP_data %>%
+  map(~ count(tibble(x = .x), x))
+```
+
+## Preprocess data
+
+### IHC scores
+
+Data wrangling - split multiple IHC scores into separate columns. Deliminators can be comma or semicolon
+
+```{r}
+CUP_data_wrangled <- CUP_data |>
+  # split_to_one_row_per_measurement(column_name = `IHC scores`, measurement_name = "IHC") |>
+  # Keep the original column before processing
+  mutate(value_name = `IHC scores`) |>
+  # replace "na" by NA
+  mutate(value_name = ifelse(value_name == "na", NA, value_name)) |>
+  separate_longer_delim(value_name, delim = regex("[;,] ")) |>
+  separate_wider_delim(value_name,
+    names = c("col_name", "value_name"),
+    delim = " ",
+    too_few = "align_start",
+    too_many = "merge"
+  ) |>
+  # Fix problem that MMR can either be d or p instead of a number behind the name
+  mutate(value_name = ifelse(col_name %in% c("pMMR", "dMMR"), col_name, value_name)) |>
+  mutate(col_name = ifelse(col_name %in% c("pMMR", "dMMR"), "MMR", col_name)) |>
+  mutate(col_name = ifelse(is.na(col_name), NA, paste0("IHC_", col_name))) |>
+  df_wider_and_cleanup()
+
+# Quality control, check that columns with all NA for IHC were indeed empty
+CUP_data_wrangled |>
+  filter(if_all(starts_with("IHC_"), is.na)) |>
+  pull(CUPID)
+
+# Look at the output
+CUP_data_wrangled |>
+  select(CUPID, starts_with("IHC")) |>
+  head(3)
+
+# Quality control: rows should not be added or deleted
+stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
+```
+
+### Include a measure if IHCs were assessed.
+
+
+### SNVs
+
+Replace columns with only x by NA, because it combines "not assessed", "not detected" and "not relevant". 
+And after that split mutations into a column per gene, where the value is the type of SNV. 
+
+Note: what to do when two SNVs are found in one gene? I now put them in the same field separated by |
+
+```{r}
+CUP_data_wrangled <- CUP_data_wrangled |>
+  # Keep the original column before processing
+  mutate(value_name = `Relevant SNVs`) |>
+  # Replace X by NA
+  mutate(value_name = ifelse(value_name == "x", NA, value_name)) |>
+  separate_longer_delim(value_name, delim = regex("[;,] ")) |>
+  # Assume that the first word of a SNV is the gene
+  mutate(col_name = ifelse(is.na(value_name), NA,
+    paste0("SNV_", str_extract(value_name, "^[^ ]+"))
+  )) |>
+  df_wider_and_cleanup()
+
+# Look at the intermediate
+CUP_data_wrangled |>
+  select(CUPID, contains("SNV")) |>
+  head(3)
+```
+
+## Create a list of all SNVs in this study
+
+```{r}
+all_SNVs <- CUP_data_wrangled |>
+  # Keep the original column before processing
+  mutate(value_name = `Relevant SNVs`) |>
+  # Replace X by NA
+  mutate(value_name = ifelse(value_name == "x", NA, value_name)) |>
+  separate_longer_delim(value_name, delim = regex("[;,] ")) |>
+  # Assume that the first word of a SNV is the gene
+  mutate(gene_symbol = ifelse(is.na(value_name), NA,
+    str_extract(value_name, "^[^ ]+")
+  )) |>
+  select(gene_symbol, value_name) |>
+  remove_missing() |>
+  arrange(gene_symbol)
+
+output_file <- file.path(output_dir, str_glue("all_SNVs_{cohort_name}.csv"))
+print(paste("Saving to...", output_file))
+write_csv(all_SNVs,
+  file = output_file,
+  na = ""
+)
+```
+
+#### Include whether genes were assessed for SNV analysis
+
+Options are: assessed (no SNVs identified), not assessed, or the name of the SNV per gene.
+
+The code below:
+1. Uses the Method column to decide which gene panels were used.
+2. For each gene SNV, it replaces the "NA" with either assessed or not assessed.
+
+```{r}
+gene_panels <- read_tsv(file.path(file_location, "data/gene_metadata", gene_panels_tsv))
+head(gene_panels)
+
+panel_per_platform_lookup <- read_tsv(file.path(file_location, "data/gene_metadata", panel_per_platform_lookup_tsv))
+
+source(here("code/R/functions/genes_assessed.R"))
+
+# 1. Create a list of assessed SNVs per patient
+genes_assessed_per_patient <- map(CUP_data_wrangled$Methods, get_list_of_assessed_genes_per_patient, mutation_type = "SNV")
+
+# 2. Check for each gene symbol if it is assessed
+CUP_data_wrangled <- CUP_data_wrangled |>
+  mutate(patient_index = row_number()) |>
+  rowwise() |>
+  mutate(
+    across(starts_with("SNV_"), \(x) set_assessment_value(x, patient_index = patient_index, col_name = cur_column()))
+  ) |>
+  select(-patient_index)
+CUP_data_wrangled |>
+  select(CUPID, Methods, contains("SNV")) |>
+  head(3)
+```
+
+#### Create a small report with the nr of assessed genes per patient
+
+```{r}
+stopifnot(length(genes_assessed_per_patient) == nrow(CUP_data_wrangled))
+names(genes_assessed_per_patient) <- CUP_data_wrangled$CUPID
+
+## Patients assessed per gene?
+assessed_SNVs_per_patient <- get_patients_assessed_per_gene(genes_assessed_per_patient) |>
+  rename(CUPID = ID) |>
+  mutate(CUPID = paste0("Patient ", CUPID))
+
+```
+
+#### Quality control
+
+```{r}
+# Look at the output
+CUP_data_wrangled |>
+  select(CUPID, contains("SNV")) |>
+  head(3)
+
+# Quality control: rows should not be added or deleted
+stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
+```
+
+### Relevant deletions
+
+This can be not assessed, assessed (but nothing found or not relevant) or the gene
+name itself.
+
+```{r}
+CUP_data_wrangled <- CUP_data_wrangled |>
+  # Keep the original column before processing
+  mutate(value_name = `Relevant Deletions`) |>
+  separate_longer_delim(value_name, delim = regex("[;,] ")) |>
+  mutate(col_name = ifelse(is.na(value_name), NA, paste0("Del_", value_name))) |>
+  df_wider_and_cleanup()
+
+# Look at the output
+CUP_data_wrangled |>
+  select(CUPID, contains("Del")) |>
+  head(3)
+
+# Quality control: rows should not be added or deleted
+stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
+```
+
+### Relevant Amplifications
+
+Similar syntax as deletions.
+
+```{r}
+CUP_data_wrangled <- CUP_data_wrangled |>
+  # Keep the original column before processing
+  mutate(value_name = `Relevant Amplifications`) |>
+  separate_longer_delim(value_name, delim = regex("[;,] ")) |>
+  mutate(col_name = ifelse(is.na(value_name), NA, paste0("Amp_", value_name))) |>
+  df_wider_and_cleanup()
+
+# Look at the output
+CUP_data_wrangled |>
+  select(CUPID, contains("Amp")) |>
+  head(3)
+
+# Quality control: rows should not be added or deleted
+stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
+```
+
+### Overexpression/Signatures
+
+This column can have genes and signatures. Use the same approach as in SNVs to
+preserve information in the columns as values.
+
+```{r}
+CUP_data_wrangled <- CUP_data_wrangled |>
+  # Keep the original column before processing
+  mutate(value_name = `Overexpression/Signatures`) |>
+  separate_longer_delim(value_name, delim = regex("[;,] ")) |>
+  # Assume that the first word of a signature is the gene/signature. Or "not assessed"
+  mutate(col_name = case_when(
+    is.na(value_name) ~ NA,
+    value_name == "not assessed" ~ "Sig_not_assessed",
+    .default = paste0("Sig_", str_extract(value_name, "^[^ ]+"))
+    )
+  ) |>
+  df_wider_and_cleanup()
+
+# Look at the output
+CUP_data_wrangled |>
+  select(CUPID, contains("Sig")) |>
+  head(2)
+
+# Quality control: rows should not be added or deleted
+stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
+```
+
+## Fusions
+
+Replace "na" with "not assessed"
+
+```{r}
+CUP_data_wrangled <- CUP_data_wrangled |>
+  mutate(`Fusions detected` = str_replace(`Fusions detected`, "^na$", "not assessed")) |>
+  # Keep the original column before processing
+  mutate(value_name = `Fusions detected`) |>
+  separate_longer_delim(value_name, delim = regex("[,] ")) |>
+  # A fusion is two genes/components split by two colons, e.g. A::B. By adding an extra split,
+  # it should create two rows, one for the first gene fusion and one for the second half.
+  # If there is additional info, e.g. the chromosome, we remove it here to only keep gene names
+  # This is everything after a space after the gene fusions
+  mutate(fusion_component = value_name) |>
+  mutate(fusion_component = str_remove(fusion_component, " .*")) |>
+  separate_longer_delim(fusion_component, delim = regex("::")) |>
+  # A fusion is two genes/components split by two colons, e.g. A::B
+  mutate(col_name = case_when(
+    is.na(value_name) ~ NA,
+    value_name == "not assessed" ~ "Fus_not_assessed",
+    .default = paste0("Fus_", fusion_component)
+    )
+  ) |>
+  select(-fusion_component) |>
+  df_wider_and_cleanup()
+
+# Look at the output
+CUP_data_wrangled |>
+  select(CUPID, contains("Fus")) |>
+  head(2)
+
+# Quality control: rows should not be added or deleted
+stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
+```
+
+#### Include whether genes were assessed for fusion analysis
+
+Options are: assessed (no fusions identified), not assessed, or the name of the fusion per gene.
+
+The code below:
+1. Uses the Method column to decide which gene panels were used.
+2. For each gene fusion, it replaces the "NA" with either assessed or not assessed.
+
+```{r}
+# 1. Create a list of assessed fusions per patient
+genes_assessed_per_patient <- map(CUP_data_wrangled$Methods, get_list_of_assessed_genes_per_patient, mutation_type = "Fusion")
+
+# 2. Check for each gene symbol if it is assessed
+CUP_data_wrangled <- CUP_data_wrangled |>
+  mutate(patient_index = row_number()) |>
+  rowwise() |>
+  mutate(
+    across(starts_with("Fus_"), \(x) set_assessment_value(x, patient_index = patient_index, col_name = cur_column()))
+  ) |>
+  select(-patient_index, -Fus_assessed, -Fus_not_assessed)
+CUP_data_wrangled |>
+  select(CUPID, Methods, contains("Fus")) |>
+  head(3)
+```
+
+#### Create a small report with the nr of assessed genes per patient
+
+```{r}
+stopifnot(length(genes_assessed_per_patient) == nrow(CUP_data_wrangled))
+names(genes_assessed_per_patient) <- CUP_data_wrangled$CUPID
+
+## Patients assessed per gene?
+assessed_fusions_per_patient <- get_patients_assessed_per_gene(genes_assessed_per_patient) |>
+  rename(CUPID = ID) |>
+  mutate(CUPID = paste0("Patient ", CUPID))
+```
+
+## Sort per gene and transpose table
+
+For now the sorting is alphabetical.
+
+```{r}
+sort_and_transpose_table <- function(CUP_data_wrangled){
+  new_colnames <- setdiff(colnames(CUP_data_wrangled), colnames(CUP_data))
+  print(new_colnames)
+  CUP_data_transposed <- CUP_data_wrangled |>
+    # Move the gene name first so that we can sort them
+    rename_with(
+      ~ sub("(.*?)_(.*)", "\\2_\\1", .x),
+      .cols = all_of(new_colnames)
+    )
+  
+  # Sort columns
+  new_colnames_sorted <- setdiff(colnames(CUP_data_transposed), colnames(CUP_data)) |>
+    sort()
+  
+  CUP_data_transposed <- CUP_data_transposed |>
+    select(all_of(colnames(CUP_data)), all_of(new_colnames_sorted)) |>
+    # Transpose
+    pivot_longer(-CUPID, names_to = "col", values_to = "value") |>
+    mutate(CUPID = paste0("Patient ", CUPID)) |>
+    pivot_wider(names_from = CUPID, values_from = value)
+  
+  
+  print(colnames(CUP_data_transposed))
+  print(head(CUP_data_transposed, 1))
+  return(CUP_data_transposed)
+}
+CUP_data_transposed <- sort_and_transpose_table(CUP_data_wrangled)
+```
+
+## Save preprocessed data
+
+Save files
+
+```{r}
+output_file <- file.path(output_dir, str_replace(input_excel, ".xlsx$", "_preprocessed.csv"))
+print(paste("Saving to...", output_file))
+write_csv(CUP_data_wrangled,
+  file = output_file,
+  na = ""
+)
+
+output_file <- file.path(output_dir, str_replace(input_excel, ".xlsx$", "_transposed.csv"))
+print(paste("Saving to...", output_file))
+write_csv(CUP_data_transposed,
+  file = output_file,
+  na = ""
+)
+```
+
+## Create a separate file without exact mutations, only with affected genes
+
+For KRAS - highlight G12C mutations (see for example https://doi.org/10.1111/joim.13057 and https://doi.org/10.1038/s41392-025-02473-8)
+For BRAF, highlight class 1 and 3 (see for example https://doi.org/10.1158/1078-0432.CCR-19-0311).
+
+(class 1–V600E) or as dimers (class 2–codons 597/601), and RAS-dependent with impaired kinase activity (class 3–codons 594/596)
+
+```{r}
+define_BRAF_class <- function(BRAF_mut){
+  if(BRAF_mut == "not assessed"){
+    return("not assessed")
+  }
+  if(BRAF_mut == "assessed"){
+    return("assessed")
+  }
+  
+  # class 1–V600E
+  if(BRAF_mut == "BRAF V600E"){
+    return("BRAF class I")
+  }
+  BRAF_codon <- str_extract(BRAF_mut, "\\d+") |>
+    as.integer()
+  # class 2–codons 597/601
+  if(BRAF_codon >= 597 & BRAF_codon <= 601){
+    return("BRAF class II")
+  }
+  # class 3–codons 594/596
+  if(BRAF_codon >= 594 & BRAF_codon <= 596){
+    return("BRAF class III")
+  }
+  return("BRAF other")
+}
+
+define_KRAS_class <- function(KRAS_mut){
+  case_when(
+    KRAS_mut == "not assessed" ~ "not assessed",
+    KRAS_mut == "assessed" ~ "assessed",
+    KRAS_mut == "KRAS pG12C" ~ "KRAS p.G12C",
+    KRAS_mut == "KRAS p.G12C" ~ "KRAS p.G12C",
+    .default = "KRAS non-G12C"
+  )
+}
+
+CUP_data_wrangled_pergene <- CUP_data_wrangled |>
+  # Replace specific mutations with the gene name
+  # Assume that the first word of a SNV is the gene
+  # Except to show the difference between KRAS G12C and other mutations
+  # Or BRAF class I and III
+  rowwise() |>
+  mutate(
+    across(any_of("SNV_BRAF"), define_BRAF_class),
+    across(any_of("SNV_KRAS"), define_KRAS_class)
+    )|>
+  mutate(across(starts_with("SNV_"), \(x) case_when(
+    # KRAS
+    str_detect(x, "KRAS") ~ x,
+    # BRAF
+    str_detect(x, "BRAF") ~ x,
+    # Others SNVs
+    x == "assessed" ~ "assessed",
+    x == "not assessed" ~ "not assessed",
+    .default = str_extract(x, "^[^ ]+")
+    )))|>
+  # Replace specific fusions with the gene name
+  # For this, use the column name that I defined before
+  mutate(across(starts_with("Fus_"), \(x) case_when(
+    x == "assessed" ~ "assessed",
+    x == "not assessed" ~ "not assessed",
+    .default = str_remove(cur_column(), "^Fus_")
+    )))|>
+  # Fill NA in the IHC with "assessed" or "not assessed".
+  # Assumption: if there is no score, the specific IHC was not assessed.
+  mutate(across(starts_with("IHC_"), \(x) ifelse(is.na(x), "not assessed", x))) |>
+  # Clean up deletions and amplifications
+  select(-Del_not_assessed, -Del_assessed) |>
+  mutate(across(starts_with("Del_"), \(x) case_when(
+    is.na(x) & `Relevant Deletions` == "not assessed" ~ "not assessed",
+    is.na(x) ~ "assessed",
+    .default = x
+    )))|>
+  select(-Amp_not_assessed, -Amp_assessed) |>
+  mutate(across(starts_with("Amp_"), \(x) case_when(
+    is.na(x) & `Relevant Amplifications` == "not assessed" ~ "not assessed",
+    is.na(x) ~ "assessed",
+    .default = x
+    )))|>
+  # Fill NA in the signatures with assessed or not assessed - if MASTER was used
+  select(-Sig_not_assessed) |>
+  mutate(across(starts_with("Sig_"), \(x) case_when(
+    is.na(x) & str_detect(Methods, "MASTER") ~ "assessed",
+    is.na(x) ~ "not assessed",
+    .default = x
+    )))
+```
+
+## Sort per gene and transpose table
+
+For now the sorting is alphabetical.
+
+```{r}
+CUP_data_transposed_pergene <- sort_and_transpose_table(CUP_data_wrangled_pergene)
+```
+
+## Save preprocessed data
+
+```{r}
+output_file <- file.path(output_dir, str_replace(input_excel, ".xlsx$", "_preprocessed_pergene.csv"))
+print(paste("Saving to...", output_file))
+write_csv(CUP_data_wrangled_pergene,
+  file = output_file,
+  na = ""
+)
+
+output_file <- file.path(output_dir, str_replace(input_excel, ".xlsx$", "_transposed_pergene.csv"))
+print(paste("Saving to...", output_file))
+write_csv(CUP_data_transposed_pergene,
+  file = output_file,
+  na = ""
+)
+
+### Save the tables whether genes were assessed for SNV and fusion analysis
+
+
+output_file <- file.path(output_dir, 
+                         str_glue("assessed_SNVs_per_patient_{cohort_name}.csv"))
+print(paste("Saving to...", output_file))
+write_csv(assessed_SNVs_per_patient,
+  file = output_file,
+  na = ""
+)
+output_file <- file.path(output_dir,
+                         str_glue("assessed_fusions_per_patient_{cohort_name}.csv"))
+print(paste("Saving to...", output_file))
+write_csv(assessed_fusions_per_patient,
+  file = output_file,
+  na = ""
+)
+```

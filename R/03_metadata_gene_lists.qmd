@@ -1,0 +1,371 @@
+---
+title: "03_metadata_gene_lists"
+date: "`r Sys.Date()`"
+engine: knitr
+format: 
+  html:
+    self-contained: true
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    df-print: kable
+---
+
+## Introduction
+
+Create a table to show which genes were assessed in which molecular diagnostics assay.
+Visualize this using an UpSet plot.
+
+### Note on renaming old gene names
+
+Some gene symbols were no longer used. The HGNC Multi Symbol Checker (https://www.genenames.org/tools/multi-symbol-checker/) and the HGNC approved gene lists with version 2026-04-07 (hgnc_complete_set_2026-04-07.tsv) were used to check for old gene symbols. The original gene symbol, change, and URL are listed in the Excel sheets when any changes were made.
+
+## Preparation
+
+```{r}
+library(tidyverse)
+library(here)
+library(readxl)
+library(UpSetR)
+```
+
+## Load metadata
+
+Open the HGNC table with gene symbols and HGNC identifiers.
+
+```{r}
+file_location <- here()
+
+gene_identifier_table <- read_tsv(file.path(
+  file_location, "data/gene_metadata",
+  "hgnc_complete_set_2026-04-07.tsv"
+)) |>
+  rename(gene_symbol = symbol)
+```
+Read all sheets in the metadata table, except the index sheet.
+
+```{r}
+input_metadata <- "metadata_panels_and_sequencing_v1.0.xlsx"
+(input_metadata <- file.path(file_location, "data/gene_metadata", input_metadata))
+
+metadata_sheets <- setdiff(excel_sheets(input_metadata), "index")
+metadata_sheets
+
+metadata <- lapply(metadata_sheets, \(x) read_excel(path = input_metadata, sheet = x))
+names(metadata) <- metadata_sheets
+```
+
+Combine all sheets with assessed genes into one table.
+
+```{r}
+# full join on gene symbols to get all gene symbols into a data frame
+gene_metadata_merged <- metadata |>
+  imap(\(sheet, column) sheet |>
+    mutate("platform" = column) |>
+    select(platform, gene_symbol)) |>
+  bind_rows() |>
+  mutate(gene_symbol2 = gene_symbol) |>
+  pivot_wider(id_cols = gene_symbol, names_from = platform, values_from = gene_symbol2) |>
+  mutate(across(everything(), \(x) replace_na(x, "not assessed"))) |>
+  left_join(
+    select(gene_identifier_table, hgnc_id, entrez_id, gene_symbol, ensembl_gene_id),
+    by = "gene_symbol"
+  )
+head(gene_metadata_merged)
+dim(gene_metadata_merged)
+```
+
+## Include all genes for MASTER and WGS
+
+For the analysis with DKTK/MASTER or WGS, whole genome sequencing was used.
+
+This means (we assume) that all genes were measured. We could either add a list of genes (e.g >20.000 genes), or only include the genes listed in other assays in tables, and allow "all assessed" in further analyses.
+
+We have decided to keep this information in Figure captions and not include WGS/Master in the figure.
+
+## Write to file
+
+```{r}
+write_tsv(gene_metadata_merged,
+  (file.path(file_location, "data/gene_metadata", "metadata_panels_and_sequencing.tsv")),
+  na = ""
+)
+# Also save the index table with lists-to-use
+index_table <- read_excel(path = input_metadata, sheet = "index") |>
+  select(Platform, `Gene list SNVs`, `Gene list Fusions`, `SNVs detected`, `Fusions detected`)
+
+index_table |>
+  write_tsv(
+    (file.path(file_location, "data/gene_metadata", "gene_panels_and_platform_names.tsv")),
+    na = ""
+  )
+```
+
+## Synthetic metadata
+
+Based on: https://www.statology.org/create-empty-data-frame-in-r/
+
+```{r}
+# create data frame with 0 rows and 5 columns
+gene_metadata_synthetic <- data.frame(matrix(
+  data = rep(c("A", "B", "C", "D"), ncol(gene_metadata_merged)),
+  ncol = ncol(gene_metadata_merged), nrow = 4
+))
+
+# provide column names
+colnames(gene_metadata_synthetic) <- colnames(gene_metadata_merged)
+
+
+# Set some to not assessed
+gene_metadata_synthetic[c(1, 2), "DHS-3501Z"] <- "not assessed"
+gene_metadata_synthetic[c(1, 4), "Archer"] <- "not assessed"
+gene_metadata_synthetic[c(2, 3), "Basic-NGS"] <- "not assessed"
+gene_metadata_synthetic[c(1, 2), "Master"] <- "not assessed"
+
+# Stuff
+gene_metadata_synthetic["NCBI_Gene_ID"] <- c(1, 2, NA, 4)
+gene_metadata_synthetic["Ensembl_gene_ID"] <- c("ENSG1", "ENSG2", NA, "ENSG4")
+gene_metadata_synthetic
+
+write_tsv(gene_metadata_synthetic,
+  (file.path(file_location, "data/gene_metadata", "metadata_panels_and_sequencing_synthetic.tsv")),
+  na = ""
+)
+```
+
+## Check overlap between gene lists
+
+First, study genes without a HGNC code. These are likely old gene names and should not be in the table.
+
+```{r}
+gene_metadata_merged |>
+  filter(is.na(hgnc_id))
+```
+
+### UpSet Plot visualization
+
+Next, prepare the data for visualization in an UpSet plot, where assessed genes have value 1 and not assessed genes value 0. 
+
+Code based on: <https://upset.app/> and <https://github.com/hms-dbmi/UpSetR?tab=readme-ov-file>.
+
+```{r}
+data_for_upsetplot <- gene_metadata_merged |>
+  select(gene_symbol, all_of(metadata_sheets)) |>
+  rowwise() |>
+  mutate(
+    across(-gene_symbol, \(x) case_when(x == "not assessed" ~ as.integer(0),
+      x == gene_symbol ~ as.integer(1),
+      .default = NA
+    ))
+  ) |>
+  column_to_rownames("gene_symbol")
+
+if (any(is.na(data_for_upsetplot))) stop()
+
+head(data_for_upsetplot)
+```
+
+Quality control: look at some values:
+
+```{r}
+table(data_for_upsetplot$Archer)
+```
+
+```{r}
+index_table
+```
+
+```{r}
+#| fig-height: 4.7 # 12 cm
+#| fig-width: 6.3 # 16 cm
+# SNVs
+SNV_gene_lists <- index_table |>
+  filter(`SNVs detected` == "yes") |>
+  unique() |>
+  pull(`Gene list SNVs`) |>
+  unique()
+
+upset_plot <- function(df){
+  p <- upset(
+    df, 
+    nintersects = NA, 
+    nsets = ncol(data_for_upsetplot) + 1,
+    text.scale = 1.3,
+    mb.ratio = c(0.65, 0.35)
+    )
+}
+
+p_upset_SNV <- data_for_upsetplot |>
+  select(intersect(colnames(data_for_upsetplot), SNV_gene_lists)) |>
+  filter_out(if_all(everything(), \(x) x == 0)) |>
+  upset_plot()
+p_upset_SNV
+
+# Fusions
+Fusion_gene_lists <- index_table |>
+  filter(`Fusions detected` == "yes") |>
+  unique() |>
+  pull(`Gene list Fusions`)
+
+p_upset_Fus <- data_for_upsetplot |>
+  select(intersect(colnames(data_for_upsetplot), Fusion_gene_lists)) |>
+  filter_out(if_all(everything(), \(x) x == 0)) |>
+  upset_plot()
+p_upset_Fus
+```
+
+### Euler Plot visualization
+
+Using the eulerr R package (https://jolars.github.io/eulerr/)
+
+```{r}
+library(eulerr)
+
+data_for_eulerplot <- data_for_upsetplot |>
+  select(intersect(colnames(data_for_upsetplot), SNV_gene_lists)) |>
+  filter_out(if_all(everything(), \(x) x == 0))
+```
+
+
+The problem is that the 7 unique genes for DHS-3501Z are now missing. TODO discuss with Thomas what we want to keep.
+
+```{r}
+#| fig-height: 4.7 # 12 cm
+#| fig-width: 6.3 # 16 cm
+
+(p_euler_SNV <- plot(
+  euler(data_for_eulerplot),
+  edges = TRUE,
+  labels = TRUE,
+  quantities = list(cex = 0.7)
+)
+)
+
+(p_euler_SNV_bw <- plot(
+  euler(data_for_eulerplot),
+  fills = FALSE,
+  edges = TRUE,
+  labels = TRUE,
+  quantities = list(cex = 0.7)
+)
+)
+```
+
+```{r}
+data_for_eulerplot |> colnames()
+data_for_eulerplot |> 
+  select("OFA", "OFA plus", "DHS-3501Z", "CGP") |>
+  euler() |>
+  plot(quantities = TRUE)
+```
+
+### Bar Plot visualization
+
+Show overlap between techniques and genes in each list
+
+```{r}
+# Order from large to small
+sorted_platform_names <- colSums(data_for_eulerplot) |> 
+  sort(decreasing = TRUE) |> 
+  names()
+
+# Count overlap between techniques
+df_plot <- data_for_eulerplot |>
+  rownames_to_column("gene_symbol") |>
+  pivot_longer(
+    -gene_symbol,
+    names_to = "platform",
+    values_to = "assessed"
+  ) |>
+  group_by(gene_symbol) |>
+  mutate(n_platforms_assessed = sum(assessed == 1, na.rm = TRUE)) |>
+  ungroup() |>
+  filter(assessed == 1) |>
+  count(platform, n_platforms_assessed)
+
+# Plot
+p_bar <- df_plot |>
+  mutate(n_platforms_assessed = factor(n_platforms_assessed),
+         platform = factor(platform, levels = sorted_platform_names)) |>
+  ggplot(aes(x = platform, y = n, fill = n_platforms_assessed)) +
+  labs(x = "", y = "Number of assessed genes", fill = "Detected in nr. of platforms") +
+  theme_classic() +
+  theme(legend.position = "bottom",
+        panel.grid.major.y = element_line(color = "grey90")
+) +
+  guides(fill = guide_legend(nrow = 1))
+
+(p_bar1 <- p_bar + 
+  geom_col(color = "grey20") +
+  scale_fill_grey(start = 1, end = 0)
+)
+(p_bar2 <- p_bar + 
+  geom_col(color = "grey20") +
+  scale_fill_grey(start = 1, end = 0) +
+  geom_text(
+    aes(label = ifelse(n > 20, n, "")),
+    position = position_stack(vjust = 0.5),
+    size = 3
+  )
+)
+(p_bar3 <- p_bar + 
+  geom_col() +
+  scale_fill_grey(start = 0.9, end = 0)
+)
+(p_bar4 <- p_bar + 
+  geom_col() +
+  scale_fill_viridis_d(direction = -1)
+)
+```
+
+### Save figures
+
+```{r}
+# Save as png and svg
+save_plot <- function(plot_obj, file_path, filename, verbose = TRUE,
+                      width = 16, height = 12
+                      ){
+  png_file <- file.path(file_path, str_glue("{filename}.png"))
+  svg_file <- file.path(file_path, str_glue("{filename}.svg"))
+  if(verbose){
+    print(str_glue("Saving PNG to: {png_file}"))
+    print(str_glue("Saving SVG to: {svg_file}"))
+  }
+  png(png_file, width = width, height = height, units = "cm", res = 300)
+  show(plot_obj)
+  dev.off()
+  
+  svg(svg_file, width = width/2.54, height = height/2.54)
+  show(plot_obj)
+  dev.off()
+}
+# UpSet plots
+save_plot(p_upset_Fus, 
+          file.path(file_location, "output/gene_metadata"), 
+          "upset_plot_fusions")
+save_plot(p_upset_SNV, 
+          file.path(file_location, "output/gene_metadata"), 
+          "upset_plot_SNVs")
+
+# Euler plots
+save_plot(p_euler_SNV, 
+          file.path(file_location, "output/gene_metadata"), 
+          "euler_plot_SNVs")
+save_plot(p_euler_SNV_bw, 
+          file.path(file_location, "output/gene_metadata"), 
+          "euler_plot_SNVs_bw")
+
+# Bar plots
+save_plot(p_bar1, 
+          file.path(file_location, "output/gene_metadata"), 
+          "bar_plot_SNVs_option1")
+save_plot(p_bar2, 
+          file.path(file_location, "output/gene_metadata"), 
+          "bar_plot_SNVs_option2")
+save_plot(p_bar3, 
+          file.path(file_location, "output/gene_metadata"), 
+          "bar_plot_SNVs_option3")
+save_plot(p_bar4, 
+          file.path(file_location, "output/gene_metadata"), 
+          "bar_plot_SNVs_option4")
+```
