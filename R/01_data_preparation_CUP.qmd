@@ -138,7 +138,7 @@ CUP_data_wrangled <- CUP_data_wrangled |>
   separate_longer_delim(value_name, delim = regex("[;,] ")) |>
   # Assume that the first word of a SNV is the gene
   mutate(col_name = ifelse(is.na(value_name), NA,
-    paste0("SNV_", str_extract(value_name, "^[^ ]+"))
+    paste0("SNV_", str_extract(str_trim(value_name), "^[^ ]+"))
   )) |>
   df_wider_and_cleanup()
 
@@ -159,7 +159,7 @@ all_SNVs <- CUP_data_wrangled |>
   separate_longer_delim(value_name, delim = regex("[;,] ")) |>
   # Assume that the first word of a SNV is the gene
   mutate(gene_symbol = ifelse(is.na(value_name), NA,
-    str_extract(value_name, "^[^ ]+")
+    str_extract(str_trim(value_name), "^[^ ]+")
   )) |>
   select(gene_symbol, value_name) |>
   remove_missing() |>
@@ -175,7 +175,38 @@ write_csv(all_SNVs,
 
 ### Also include rows for non-relevant SNVs
 
-For genes that were altered but not relevant: create a column if it was measured, but not in the column of relevant SNVs. Do not include the mutation itself, only "assessed - not relevant".
+For genes that were altered but not relevant: create a column if it was measured, but not in the column of relevant SNVs. Do not include the mutation itself, only "altered - not relevant".
+
+```{r}
+all_SNVs_CUP <- CUP_data_wrangled |>
+  select(CUPID, `All SNVs`) |>
+  rename(value_name = `All SNVs`) |>
+  # Replace X by NA
+  mutate(value_name = ifelse(value_name == "x", NA, value_name)) |>
+  mutate(value_name = ifelse(value_name == "not detected", NA, value_name)) |>
+  mutate(value_name = ifelse(value_name == "not assessed", NA, value_name)) |>
+  separate_longer_delim(value_name, delim = regex("[;,] ")) |>
+  # Assume that the first word of a SNV is the gene
+  mutate(col_name = ifelse(is.na(value_name), NA,
+    paste0("SNV_", str_extract(str_trim(value_name), "^[^ ]+"))
+  )) |>
+  # Set all values to "altered - not relevant"
+  mutate(value_name = ifelse(is.na(value_name), NA, "altered - not relevant")) |>
+  distinct() |>
+  df_wider_and_cleanup()
+
+# Add only the columns for which no relevant SNV was measured. In the next section
+# we add the "altered - not relevant" to SNV columns with relevant mutations.
+# but that is a bit more complicated
+columns_to_add <- setdiff(colnames(all_SNVs_CUP), colnames(CUP_data_wrangled))
+
+CUP_data_wrangled <- CUP_data_wrangled |>
+  left_join(
+    select(all_SNVs_CUP, CUPID, all_of(columns_to_add)),
+    by = "CUPID"
+  )
+```
+
 
 #### Include whether genes were assessed for SNV analysis
 
