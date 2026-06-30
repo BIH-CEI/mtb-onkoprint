@@ -7,12 +7,12 @@ get_gene_list_names_from_methdos <- function(Methods, mutation_type, panel_looku
     .data[[mutation_type]] == "yes",
     Platform %in% list_of_methods
   )
-  if(mutation_type == "Fusions detected"){
+  if (mutation_type == "Fusions detected") {
     Gene_list_to_use <- panel_list[["Gene list Fusions"]]
-  } else{
+  } else {
     Gene_list_to_use <- panel_list[["Gene list SNVs"]]
   }
-    
+
   return(Gene_list_to_use)
 }
 
@@ -65,7 +65,7 @@ check_if_gene_was_assessed <- function(patient_index, gene_symbol, genes_assesse
   }
 }
 
-set_assessment_value <- function(SNV_value, patient_index, col_name, genes_assessed, 
+set_assessment_value <- function(SNV_value, patient_index, col_name, genes_assessed,
                                  assessed_label = "assessed", not_assessed_label = "not assessed") {
   gene_symbol <- str_remove(col_name, "SNV_")
   # return the SNV if it was mutated
@@ -82,17 +82,17 @@ set_assessment_value <- function(SNV_value, patient_index, col_name, genes_asses
   }
 }
 
-get_patients_assessed_per_gene <- function(list_of_genes_assessed_per_patient){
+get_patients_assessed_per_gene <- function(list_of_genes_assessed_per_patient) {
   # Adapted based on code suggestion from ChatGPT:
-  
+
   # All genes assessed
   possible_values <- list_of_genes_assessed_per_patient |>
     unlist() |>
     unique() |>
     setdiff("all_assessed") |>
     sort()
-  
-  
+
+
   df <- imap_dfr(list_of_genes_assessed_per_patient, \(vals, id) {
     tibble(ID = id) |>
       bind_cols(

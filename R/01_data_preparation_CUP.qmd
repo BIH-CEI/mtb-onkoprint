@@ -13,10 +13,9 @@ format:
 
 ## Introduction
 
-This script processes a dataset where mutations and structural variants are written
-in one column, split by comma's, to a new format where each gene has its own column.
+This script processes a dataset where mutations and structural variants are written in one column, split by comma's, to a new format where each gene has its own column.
 
-This can later be used for an onkoprint.
+This can later be used for an OnkoPrint.
 
 ## Preparation
 
@@ -69,6 +68,7 @@ colnames(CUP_data)
 ```
 
 Create an output directory using the cohort name and datestamp
+
 ```{r}
 if (!dir.exists(file.path(file_location, "output"))) dir.create(file.path(file_location, "output"))
 
@@ -87,7 +87,7 @@ CUP_data %>%
 
 ### IHC scores
 
-Data wrangling - split multiple IHC scores into separate columns. Deliminators can be comma or semicolon
+Data wrangling - split multiple IHC scores into separate columns. Deliminators can be comma or semicolon.
 
 ```{r}
 CUP_data_wrangled <- CUP_data |>
@@ -123,15 +123,11 @@ CUP_data_wrangled |>
 stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
 ```
 
-### Include a measure if IHCs were assessed.
-
-
 ### Relevant SNVs
 
-Replace columns with only x by NA, because it combines "not assessed", "not detected" and "not relevant". 
-And after that split mutations into a column per gene, where the value is the type of SNV. 
+Replace columns with only x by NA, because it combines "not assessed", "not detected" and "not relevant". And after that split mutations into a column per gene, where the value is the type of SNV.
 
-Note: what to do when two SNVs are found in one gene? I now put them in the same field separated by |
+Note: what to do when two SNVs are found in one gene? I now put them in the same field separated by \|
 
 ```{r}
 CUP_data_wrangled <- CUP_data_wrangled |>
@@ -177,14 +173,19 @@ write_csv(all_SNVs,
 )
 ```
 
+### Also include rows for non-relevant SNVs
+
+For genes that were altered but not relevant: create a column if it was measured, but not in the column of relevant SNVs. Do not include the mutation itself, only "assessed - not relevant".
+
 #### Include whether genes were assessed for SNV analysis
 
 Options are: assessed (no SNVs identified), not assessed, not relevant, or the name of the SNV per gene.
 
 The code below:
-1. Uses the Method column to decide which gene panels were used.
-2. For each gene SNV, it replaces the "NA" with either assessed or not assessed.
-3. Checks if the gene is in the column "all SNVs", meaning that there was a mutation, but not a relevant one.
+
+1.  Uses the Method column to decide which gene panels were used.
+2.  For each gene SNV, it replaces the "NA" with either assessed or not assessed.
+3.  Checks if the gene is in the column "all SNVs", meaning that there was a mutation, but not a relevant one.
 
 ```{r}
 gene_panels <- read_tsv(file.path(file_location, "data/gene_metadata", gene_panels_tsv))
@@ -195,10 +196,11 @@ panel_per_platform_lookup <- read_tsv(file.path(file_location, "data/gene_metada
 source(here("R/functions/genes_assessed.R"))
 
 # 1. Create a list of assessed SNVs per patient
-genes_assessed_per_patient <- map(CUP_data_wrangled$Methods, 
-                                  get_list_of_assessed_genes_per_patient, 
-                                  mutation_type = "SNV",
-                                  panel_lookup = panel_per_platform_lookup)
+genes_assessed_per_patient <- map(CUP_data_wrangled$Methods,
+  get_list_of_assessed_genes_per_patient,
+  mutation_type = "SNV",
+  panel_lookup = panel_per_platform_lookup
+)
 
 # 2. Create a list of altered SNVs per patient, including non-relevant ones
 genes_altered_per_patient <- CUP_data_wrangled |>
@@ -208,7 +210,8 @@ genes_altered_per_patient <- CUP_data_wrangled |>
   # Extract all genes
   mutate(
     altered_genes = map(
-      str_split(value_name, ","), \(x) str_extract(str_trim(x), "^[^ ]+"))
+      str_split(value_name, ","), \(x) str_extract(str_trim(x), "^[^ ]+")
+    )
   ) |>
   select(CUPID, altered_genes) |>
   deframe()
@@ -222,10 +225,11 @@ CUP_data_wrangled <- CUP_data_wrangled |>
       x,
       patient_index = patient_index,
       col_name = cur_column(),
-      genes_assessed = genes_altered_per_patient, 
+      genes_assessed = genes_altered_per_patient,
       assessed_label = "altered - not relevant",
-      not_assessed_label = NA))
-  ) |> 
+      not_assessed_label = NA
+    ))
+  ) |>
   mutate(
     across(starts_with("SNV_"), \(x) set_assessment_value(
       x,
@@ -233,7 +237,8 @@ CUP_data_wrangled <- CUP_data_wrangled |>
       col_name = cur_column(),
       genes_assessed = genes_assessed_per_patient,
       assessed_label = "assessed",
-      not_assessed_label = "not assessed"))
+      not_assessed_label = "not assessed"
+    ))
   ) |>
   select(-patient_index)
 CUP_data_wrangled |>
@@ -267,8 +272,7 @@ stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
 
 ### Relevant deletions
 
-This can be not assessed, assessed (but nothing found or not relevant) or the gene
-name itself.
+This can be 'not assessed', 'assessed' (but nothing found or not relevant) or the gene name itself.
 
 ```{r}
 CUP_data_wrangled <- CUP_data_wrangled |>
@@ -310,8 +314,7 @@ stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
 
 ### Overexpression/Signatures
 
-This column can have genes and signatures. Use the same approach as in SNVs to
-preserve information in the columns as values.
+This column can have genes and signatures. Use the same approach as in SNVs to preserve information in the columns as values.
 
 ```{r}
 CUP_data_wrangled <- CUP_data_wrangled |>
@@ -323,8 +326,7 @@ CUP_data_wrangled <- CUP_data_wrangled |>
     is.na(value_name) ~ NA,
     value_name == "not assessed" ~ "Sig_not_assessed",
     .default = paste0("Sig_", str_extract(value_name, "^[^ ]+"))
-    )
-  ) |>
+  )) |>
   df_wider_and_cleanup()
 
 # Look at the output
@@ -358,8 +360,7 @@ CUP_data_wrangled <- CUP_data_wrangled |>
     is.na(value_name) ~ NA,
     value_name == "not assessed" ~ "Fus_not_assessed",
     .default = paste0("Fus_", fusion_component)
-    )
-  ) |>
+  )) |>
   select(-fusion_component) |>
   df_wider_and_cleanup()
 
@@ -374,19 +375,20 @@ stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
 
 #### Include whether genes were assessed for fusion analysis
 
-Options are: assessed (no fusions identified), not assessed, or the name of the fusion per gene.
+Options are: 'assessed' (no fusions identified), 'not assessed', or the name of the fusion per gene.
 
 The code below:
-1. Uses the Method column to decide which gene panels were used.
-2. For each gene fusion, it replaces the "NA" with either assessed or not assessed.
+
+1.  Uses the Method column to decide which gene panels were used.
+2.  For each gene fusion, it replaces the "NA" with either assessed or not assessed.
 
 ```{r}
 # 1. Create a list of assessed fusions per patient
-genes_assessed_per_patient <- map(CUP_data_wrangled$Methods, 
-                                  get_list_of_assessed_genes_per_patient, 
-                                  mutation_type = "Fusion",
-                                  panel_lookup = panel_per_platform_lookup
-                                  )
+genes_assessed_per_patient <- map(CUP_data_wrangled$Methods,
+  get_list_of_assessed_genes_per_patient,
+  mutation_type = "Fusion",
+  panel_lookup = panel_per_platform_lookup
+)
 
 # 2. Check for each gene symbol if it is assessed
 CUP_data_wrangled <- CUP_data_wrangled |>
@@ -418,7 +420,7 @@ assessed_fusions_per_patient <- get_patients_assessed_per_gene(genes_assessed_pe
 For now the sorting is alphabetical.
 
 ```{r}
-sort_and_transpose_table <- function(CUP_data_wrangled){
+sort_and_transpose_table <- function(CUP_data_wrangled) {
   new_colnames <- setdiff(colnames(CUP_data_wrangled), colnames(CUP_data))
   print(new_colnames)
   CUP_data_transposed <- CUP_data_wrangled |>
@@ -427,19 +429,19 @@ sort_and_transpose_table <- function(CUP_data_wrangled){
       ~ sub("(.*?)_(.*)", "\\2_\\1", .x),
       .cols = all_of(new_colnames)
     )
-  
+
   # Sort columns
   new_colnames_sorted <- setdiff(colnames(CUP_data_transposed), colnames(CUP_data)) |>
     sort()
-  
+
   CUP_data_transposed <- CUP_data_transposed |>
     select(all_of(colnames(CUP_data)), all_of(new_colnames_sorted)) |>
     # Transpose
     pivot_longer(-CUPID, names_to = "col", values_to = "value") |>
     mutate(CUPID = paste0("Patient ", CUPID)) |>
     pivot_wider(names_from = CUPID, values_from = value)
-  
-  
+
+
   print(colnames(CUP_data_transposed))
   print(head(CUP_data_transposed, 1))
   return(CUP_data_transposed)
@@ -469,43 +471,46 @@ write_csv(CUP_data_transposed,
 
 ## Create a separate file without exact mutations, only with affected genes
 
-For KRAS - highlight G12C mutations (see for example https://doi.org/10.1111/joim.13057 and https://doi.org/10.1038/s41392-025-02473-8)
-For BRAF, highlight class 1 and 3 (see for example https://doi.org/10.1158/1078-0432.CCR-19-0311).
+For KRAS and BRAF, we will use a subcategory:
 
-(class 1–V600E) or as dimers (class 2–codons 597/601), and RAS-dependent with impaired kinase activity (class 3–codons 594/596)
+For KRAS: highlight G12C mutations (see for example https://doi.org/10.1111/joim.13057 and https://doi.org/10.1038/s41392-025-02473-8)
 
-For genes that were mutated but not relevant, replace the assessed/not assessed with "not relevant" if it was measured, but not in the column of relevant SNVs.
+For BRAF, highlight class 1 and 3 (see for example https://doi.org/10.1158/1078-0432.CCR-19-0311) Definition:
+
+-   class 1–V600E
+-   class 2–codons 597/601
+-   class 3–codons 594/596
 
 ```{r}
-define_BRAF_class <- function(BRAF_mut){
-  if(BRAF_mut == "not assessed"){
+define_BRAF_class <- function(BRAF_mut) {
+  if (BRAF_mut == "not assessed") {
     return("not assessed")
   }
-  if(BRAF_mut == "altered - not relevant"){
+  if (BRAF_mut == "altered - not relevant") {
     return("altered - not relevant")
   }
-  if(BRAF_mut == "assessed"){
+  if (BRAF_mut == "assessed") {
     return("assessed")
   }
-  
+
   # class 1–V600E
-  if(BRAF_mut == "BRAF V600E"){
+  if (BRAF_mut == "BRAF V600E") {
     return("BRAF class I")
   }
   BRAF_codon <- str_extract(BRAF_mut, "\\d+") |>
     as.integer()
   # class 2–codons 597/601
-  if(BRAF_codon >= 597 & BRAF_codon <= 601){
+  if (BRAF_codon >= 597 & BRAF_codon <= 601) {
     return("BRAF class II")
   }
   # class 3–codons 594/596
-  if(BRAF_codon >= 594 & BRAF_codon <= 596){
+  if (BRAF_codon >= 594 & BRAF_codon <= 596) {
     return("BRAF class III")
   }
   return("BRAF other")
 }
 
-define_KRAS_class <- function(KRAS_mut){
+define_KRAS_class <- function(KRAS_mut) {
   case_when(
     KRAS_mut == "not assessed" ~ "not assessed",
     KRAS_mut == "assessed" ~ "assessed",
@@ -515,7 +520,10 @@ define_KRAS_class <- function(KRAS_mut){
     .default = "KRAS non-G12C"
   )
 }
+```
 
+
+```{r}
 CUP_data_wrangled_pergene <- CUP_data_wrangled |>
   # Replace specific mutations with the gene name
   # Assume that the first word of a SNV is the gene
@@ -525,7 +533,7 @@ CUP_data_wrangled_pergene <- CUP_data_wrangled |>
   mutate(
     across(any_of("SNV_BRAF"), define_BRAF_class),
     across(any_of("SNV_KRAS"), define_KRAS_class)
-    )|>
+  ) |>
   mutate(across(starts_with("SNV_"), \(x) case_when(
     # KRAS
     str_detect(x, "KRAS") ~ x,
@@ -536,14 +544,14 @@ CUP_data_wrangled_pergene <- CUP_data_wrangled |>
     x == "not assessed" ~ "not assessed",
     x == "altered - not relevant" ~ "altered - not relevant",
     .default = str_extract(x, "^[^ ]+")
-    )))|>
+  ))) |>
   # Replace specific fusions with the gene name
   # For this, use the column name that I defined before
   mutate(across(starts_with("Fus_"), \(x) case_when(
     x == "assessed" ~ "assessed",
     x == "not assessed" ~ "not assessed",
     .default = str_remove(cur_column(), "^Fus_")
-    )))|>
+  ))) |>
   # Fill NA in the IHC with "assessed" or "not assessed".
   # Assumption: if there is no score, the specific IHC was not assessed.
   mutate(across(starts_with("IHC_"), \(x) ifelse(is.na(x), "not assessed", x))) |>
@@ -553,20 +561,20 @@ CUP_data_wrangled_pergene <- CUP_data_wrangled |>
     is.na(x) & `Relevant Deletions` == "not assessed" ~ "not assessed",
     is.na(x) ~ "assessed",
     .default = x
-    )))|>
+  ))) |>
   select(-Amp_not_assessed, -Amp_assessed) |>
   mutate(across(starts_with("Amp_"), \(x) case_when(
     is.na(x) & `Relevant Amplifications` == "not assessed" ~ "not assessed",
     is.na(x) ~ "assessed",
     .default = x
-    )))|>
+  ))) |>
   # Fill NA in the signatures with assessed or not assessed - if MASTER was used
   select(-Sig_not_assessed) |>
   mutate(across(starts_with("Sig_"), \(x) case_when(
     is.na(x) & str_detect(Methods, "MASTER") ~ "assessed",
     is.na(x) ~ "not assessed",
     .default = x
-    )))
+  )))
 ```
 
 ## Sort per gene and transpose table
@@ -595,17 +603,19 @@ write_csv(CUP_data_transposed_pergene,
 )
 
 ### Save the tables whether genes were assessed for SNV and fusion analysis
-
-
-output_file <- file.path(output_dir, 
-                         str_glue("assessed_SNVs_per_patient_{cohort_name}.csv"))
+output_file <- file.path(
+  output_dir,
+  str_glue("assessed_SNVs_per_patient_{cohort_name}.csv")
+)
 print(paste("Saving to...", output_file))
 write_csv(assessed_SNVs_per_patient,
   file = output_file,
   na = ""
 )
-output_file <- file.path(output_dir,
-                         str_glue("assessed_fusions_per_patient_{cohort_name}.csv"))
+output_file <- file.path(
+  output_dir,
+  str_glue("assessed_fusions_per_patient_{cohort_name}.csv")
+)
 print(paste("Saving to...", output_file))
 write_csv(assessed_fusions_per_patient,
   file = output_file,
