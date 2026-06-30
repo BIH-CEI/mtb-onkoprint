@@ -126,7 +126,7 @@ stopifnot(nrow(CUP_data_wrangled) == nr_of_samples)
 ### Include a measure if IHCs were assessed.
 
 
-### SNVs
+### Relevant SNVs
 
 Replace columns with only x by NA, because it combines "not assessed", "not detected" and "not relevant". 
 And after that split mutations into a column per gene, where the value is the type of SNV. 
@@ -152,7 +152,7 @@ CUP_data_wrangled |>
   head(3)
 ```
 
-## Create a list of all SNVs in this study
+## Create a list of all relevant SNVs in this study
 
 ```{r}
 all_SNVs <- CUP_data_wrangled |>
@@ -179,11 +179,12 @@ write_csv(all_SNVs,
 
 #### Include whether genes were assessed for SNV analysis
 
-Options are: assessed (no SNVs identified), not assessed, or the name of the SNV per gene.
+Options are: assessed (no SNVs identified), not assessed, not relevant, or the name of the SNV per gene.
 
 The code below:
 1. Uses the Method column to decide which gene panels were used.
 2. For each gene SNV, it replaces the "NA" with either assessed or not assessed.
+3. Checks if the gene is in the column "all SNVs", meaning that there was a mutation, but not a relevant one.
 
 ```{r}
 gene_panels <- read_tsv(file.path(file_location, "data/gene_metadata", gene_panels_tsv))
@@ -191,17 +192,48 @@ head(gene_panels)
 
 panel_per_platform_lookup <- read_tsv(file.path(file_location, "data/gene_metadata", panel_per_platform_lookup_tsv))
 
-source(here("code/R/functions/genes_assessed.R"))
+source(here("R/functions/genes_assessed.R"))
 
 # 1. Create a list of assessed SNVs per patient
-genes_assessed_per_patient <- map(CUP_data_wrangled$Methods, get_list_of_assessed_genes_per_patient, mutation_type = "SNV")
+genes_assessed_per_patient <- map(CUP_data_wrangled$Methods, 
+                                  get_list_of_assessed_genes_per_patient, 
+                                  mutation_type = "SNV",
+                                  panel_lookup = panel_per_platform_lookup)
 
-# 2. Check for each gene symbol if it is assessed
+# 2. Create a list of altered SNVs per patient, including non-relevant ones
+genes_altered_per_patient <- CUP_data_wrangled |>
+  # Replace X by NA
+  mutate(value_name = `All SNVs`) |>
+  mutate(value_name = ifelse(value_name == "x", NA, value_name)) |>
+  # Extract all genes
+  mutate(
+    altered_genes = map(
+      str_split(value_name, ","), \(x) str_extract(str_trim(x), "^[^ ]+"))
+  ) |>
+  select(CUPID, altered_genes) |>
+  deframe()
+
+# 2. Check for each gene symbol if it is assessed and relevant
 CUP_data_wrangled <- CUP_data_wrangled |>
   mutate(patient_index = row_number()) |>
   rowwise() |>
   mutate(
-    across(starts_with("SNV_"), \(x) set_assessment_value(x, patient_index = patient_index, col_name = cur_column()))
+    across(starts_with("SNV_"), \(x) set_assessment_value(
+      x,
+      patient_index = patient_index,
+      col_name = cur_column(),
+      genes_assessed = genes_altered_per_patient, 
+      assessed_label = "altered - not relevant",
+      not_assessed_label = NA))
+  ) |> 
+  mutate(
+    across(starts_with("SNV_"), \(x) set_assessment_value(
+      x,
+      patient_index = patient_index,
+      col_name = cur_column(),
+      genes_assessed = genes_assessed_per_patient,
+      assessed_label = "assessed",
+      not_assessed_label = "not assessed"))
   ) |>
   select(-patient_index)
 CUP_data_wrangled |>
@@ -219,7 +251,6 @@ names(genes_assessed_per_patient) <- CUP_data_wrangled$CUPID
 assessed_SNVs_per_patient <- get_patients_assessed_per_gene(genes_assessed_per_patient) |>
   rename(CUPID = ID) |>
   mutate(CUPID = paste0("Patient ", CUPID))
-
 ```
 
 #### Quality control
@@ -351,14 +382,18 @@ The code below:
 
 ```{r}
 # 1. Create a list of assessed fusions per patient
-genes_assessed_per_patient <- map(CUP_data_wrangled$Methods, get_list_of_assessed_genes_per_patient, mutation_type = "Fusion")
+genes_assessed_per_patient <- map(CUP_data_wrangled$Methods, 
+                                  get_list_of_assessed_genes_per_patient, 
+                                  mutation_type = "Fusion",
+                                  panel_lookup = panel_per_platform_lookup
+                                  )
 
 # 2. Check for each gene symbol if it is assessed
 CUP_data_wrangled <- CUP_data_wrangled |>
   mutate(patient_index = row_number()) |>
   rowwise() |>
   mutate(
-    across(starts_with("Fus_"), \(x) set_assessment_value(x, patient_index = patient_index, col_name = cur_column()))
+    across(starts_with("Fus_"), \(x) set_assessment_value(x, patient_index = patient_index, col_name = cur_column(), genes_assessed = genes_assessed_per_patient))
   ) |>
   select(-patient_index, -Fus_assessed, -Fus_not_assessed)
 CUP_data_wrangled |>
@@ -439,10 +474,15 @@ For BRAF, highlight class 1 and 3 (see for example https://doi.org/10.1158/1078-
 
 (class 1–V600E) or as dimers (class 2–codons 597/601), and RAS-dependent with impaired kinase activity (class 3–codons 594/596)
 
+For genes that were mutated but not relevant, replace the assessed/not assessed with "not relevant" if it was measured, but not in the column of relevant SNVs.
+
 ```{r}
 define_BRAF_class <- function(BRAF_mut){
   if(BRAF_mut == "not assessed"){
     return("not assessed")
+  }
+  if(BRAF_mut == "altered - not relevant"){
+    return("altered - not relevant")
   }
   if(BRAF_mut == "assessed"){
     return("assessed")
@@ -469,6 +509,7 @@ define_KRAS_class <- function(KRAS_mut){
   case_when(
     KRAS_mut == "not assessed" ~ "not assessed",
     KRAS_mut == "assessed" ~ "assessed",
+    KRAS_mut == "altered - not relevant" ~ "altered - not relevant",
     KRAS_mut == "KRAS pG12C" ~ "KRAS p.G12C",
     KRAS_mut == "KRAS p.G12C" ~ "KRAS p.G12C",
     .default = "KRAS non-G12C"
@@ -493,6 +534,7 @@ CUP_data_wrangled_pergene <- CUP_data_wrangled |>
     # Others SNVs
     x == "assessed" ~ "assessed",
     x == "not assessed" ~ "not assessed",
+    x == "altered - not relevant" ~ "altered - not relevant",
     .default = str_extract(x, "^[^ ]+")
     )))|>
   # Replace specific fusions with the gene name

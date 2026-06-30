@@ -1,9 +1,9 @@
-get_gene_list_names_from_methdos <- function(Methods, mutation_type) {
+get_gene_list_names_from_methdos <- function(Methods, mutation_type, panel_lookup) {
   list_of_methods <- str_split_1(Methods, pattern = ", ")
 
   # Filters the list of platforms and returns the names of all gene lists needed
   panel_list <- filter(
-    panel_per_platform_lookup,
+    panel_lookup,
     .data[[mutation_type]] == "yes",
     Platform %in% list_of_methods
   )
@@ -16,12 +16,12 @@ get_gene_list_names_from_methdos <- function(Methods, mutation_type) {
   return(Gene_list_to_use)
 }
 
-get_fusion_gene_list_names <- function(Methods) {
-  get_gene_list_names_from_methdos(Methods, mutation_type = "Fusions detected")
+get_fusion_gene_list_names <- function(Methods, panel_lookup = panel_lookup) {
+  get_gene_list_names_from_methdos(Methods, mutation_type = "Fusions detected", panel_lookup)
 }
 
-get_SNV_gene_list_names <- function(Methods) {
-  get_gene_list_names_from_methdos(Methods, mutation_type = "SNVs detected")
+get_SNV_gene_list_names <- function(Methods, panel_lookup = panel_lookup) {
+  get_gene_list_names_from_methdos(Methods, mutation_type = "SNVs detected", panel_lookup)
 }
 
 get_genes_from_gene_lists <- function(gene_lists_to_use) {
@@ -33,13 +33,13 @@ get_genes_from_gene_lists <- function(gene_lists_to_use) {
   return(assessed_genes)
 }
 
-get_list_of_assessed_genes_per_patient <- function(all_methods, mutation_type = "SNV") {
+get_list_of_assessed_genes_per_patient <- function(all_methods, mutation_type = "SNV", panel_lookup = panel_lookup) {
   if (mutation_type == "SNV") {
-    gene_lists_to_use <- get_SNV_gene_list_names(Methods = all_methods)
+    gene_lists_to_use <- get_SNV_gene_list_names(Methods = all_methods, panel_lookup)
   }
 
   if (mutation_type == "Fusion") {
-    gene_lists_to_use <- get_fusion_gene_list_names(Methods = all_methods)
+    gene_lists_to_use <- get_fusion_gene_list_names(Methods = all_methods, panel_lookup)
   }
   if ("all_assessed" %in% gene_lists_to_use) {
     return(c("all_assessed"))
@@ -52,8 +52,8 @@ get_list_of_assessed_genes_per_patient <- function(all_methods, mutation_type = 
   return(assessed_genes)
 }
 
-check_if_gene_was_assessed <- function(patient_index, gene_symbol) {
-  assessed_genes <- genes_assessed_per_patient[[patient_index]]
+check_if_gene_was_assessed <- function(patient_index, gene_symbol, genes_assessed) {
+  assessed_genes <- genes_assessed[[patient_index]]
 
   if (is.null(assessed_genes)) {
     return(FALSE)
@@ -65,23 +65,22 @@ check_if_gene_was_assessed <- function(patient_index, gene_symbol) {
   }
 }
 
-set_assessment_value <- function(SNV_value, patient_index, col_name) {
+set_assessment_value <- function(SNV_value, patient_index, col_name, genes_assessed, 
+                                 assessed_label = "assessed", not_assessed_label = "not assessed") {
   gene_symbol <- str_remove(col_name, "SNV_")
+  # return the SNV if it was mutated
   if (!is.na(SNV_value)) {
     return(SNV_value)
   } else {
-    if (patient_index == 4) {
-      gene_assessed_bool <- check_if_gene_was_assessed(patient_index, gene_symbol)
-    }
-    gene_assessed_bool <- check_if_gene_was_assessed(patient_index, gene_symbol)
+    # Otherwise test if it was assessed
+    gene_assessed_bool <- check_if_gene_was_assessed(patient_index, gene_symbol, genes_assessed)
   }
   if (gene_assessed_bool) {
-    return("assessed")
+    return(assessed_label)
   } else {
-    return("not assessed")
+    return(not_assessed_label)
   }
 }
-
 
 get_patients_assessed_per_gene <- function(list_of_genes_assessed_per_patient){
   # Adapted based on code suggestion from ChatGPT:
